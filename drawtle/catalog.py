@@ -48,8 +48,11 @@ ROOT = os.path.dirname(HERE)
 #: window is worse than a missing one, because a missing one prompts a lookup.
 KNOWN_MODELS = os.path.join(HERE, "model_registry.json")
 
-#: Discovery endpoints. Costs nothing to call and needs only a key.
-DISCOVERY = {
+#: Discovery endpoints, keyed by provider. Populated from `providers.json`
+#: rather than hardcoded, so adding a provider to that file makes it
+#: discoverable here without editing this module. The literal below is a
+#: fallback for the case where providers.json is unreadable.
+_DISCOVERY_FALLBACK = {
     "openai": {"url": "https://api.openai.com/v1/models",
                "env": ("OPENAI_API_KEY",),
                "auth": "bearer"},
@@ -60,6 +63,40 @@ DISCOVERY = {
                   "env": ("ANTHROPIC_API_KEY",),
                   "auth": "x-api-key"},
 }
+
+
+def _load_discovery():
+    """Discovery table derived from the provider registry."""
+    path = os.path.join(HERE, "providers.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            provs = json.load(fh).get("providers", {})
+    except (OSError, ValueError):
+        return dict(_DISCOVERY_FALLBACK)
+    out = {}
+    for name, spec in provs.items():
+        url = spec.get("models_url")
+        if not url:
+            continue                    # provider exposes no model-list route
+        out[name] = {"url": url,
+                     "env": tuple(spec.get("key_env") or ()),
+                     "auth": spec.get("auth") or "bearer"}
+    # A provider listed in the fallback but not the registry would otherwise
+    # vanish from discovery; the registry is authoritative, so this only fires
+    # when the registry is older than the code.
+    for name, spec in _DISCOVERY_FALLBACK.items():
+        out.setdefault(name, spec)
+    return out
+
+
+#: Live discovery table. Named DISCOVERY for compatibility with callers that
+#: import it directly; prefer `discovery_for(provider)` over indexing it.
+DISCOVERY = _load_discovery()
+
+
+def discovery_for(provider):
+    """Discovery spec for one provider, or None if it exposes no model list."""
+    return DISCOVERY.get(provider)
 
 def _config_root():
     """Where to keep this tool's config, per platform.
@@ -497,6 +534,67 @@ def _cmd_price_update(a):
     return 0
 
 
+def _cmd_providers(a):
+    """List every provider the bench can drive, from providers.json.
+
+    The registry is the answer to "which providers are supported?", so this
+    reads it rather than a hardcoded list. A provider that appears here can be
+    passed to `bench.py run --backend`.
+    """
+    path = os.path.join(HERE, "providers.json")
+    with open(path, encoding="utf-8") as fh:
+        reg = json.load(fh)
+    provs = reg.get("providers", {})
+    models = load_registry().get("models", {})
+    print(f"provider registry v{reg.get('version', 0)} -- {path}")
+    print(f"{len(provs)} provider(s)\n")
+    print(f"{'name':14} {'protocol':10} {'auth':10} {'key':6} "
+          f"{'models':7} {'discover':9} note")
+    for name, spec in sorted(provs.items()):
+        envs = spec.get("key_env") or []
+        key = "no" if not envs else ("opt" if spec.get("self_hosted") else "yes")
+        # The model table groups by its own provider label, which does not
+        # always match the backend name (Gemini's models are labelled `google`).
+        # `model_provider` in the registry declares the label to count under.
+        labels = set(spec.get("model_provider") or []) or {name}
+        n_models = len([m for m, v in models.items()
+                        if v.get("provider") in labels])
+        disc = "yes" if spec.get("models_url") else "no"
+        note = _short_note(spec.get("context_note"))
+        print(f"{name:14} {str(spec.get('protocol')):10} "
+              f"{str(spec.get('auth')):10} {key:6} {n_models:<7} {disc:9} {note}")
+    print()
+    print("key: no=needs none  opt=optional (self-hosted)  yes=required")
+    print("models: entries for this provider in drawtle/model_registry.json")
+    print("discover: whether the provider publishes a model-list endpoint")
+    print()
+    print("Run any of them with:  python bench.py run --backend <name> "
+          "--model <id> ...")
+    print("A provider with 0 models will still run; it just has no local "
+          "context/price data, so its cost is reported as unknown, not zero.")
+    return 0
+
+
+def _short_note(text, width=44):
+    """First sentence of a provider note, clipped at a word boundary.
+
+    The first sentence is taken, not the first `width` characters: a note that
+    opens with a URL would otherwise show the URL and nothing else, which is
+    the least useful part of the line.
+    """
+    if not text:
+        return ""
+    parts = text.split(". ")
+    # Prefer a sentence that is not mostly a URL or a hostname.
+    first = next((p for p in parts if "://" not in p and "http" not in p),
+                 parts[0])
+    first = " ".join(first.split()).strip().rstrip(".")
+    if len(first) <= width:
+        return first
+    return first[:width].rsplit(" ", 1)[0] + "..."
+
+
+
 def main(argv=None):
     import argparse
     p = argparse.ArgumentParser(
@@ -506,6 +604,10 @@ def main(argv=None):
 
     s = sub.add_parser("list", help="show the local model table")
     s.set_defaults(fn=_cmd_list)
+
+    s = sub.add_parser("providers",
+                       help="list every supported provider and how to auth")
+    s.set_defaults(fn=_cmd_providers)
 
     s = sub.add_parser("fetch", help="ask a provider which models exist")
     s.add_argument("backend", nargs="?", default="gemini", choices=sorted(DISCOVERY))

@@ -32,6 +32,7 @@ from drawtle import report as REP
 from drawtle import runstate as RS
 from drawtle import transcript as TR
 from drawtle import sandbox as SBX
+from drawtle import cost as CO
 from web import server as SRV
 
 DEFAULT_CONFIG = os.path.join(HERE, "configs", "default.json")
@@ -71,7 +72,7 @@ def cmd_run(a):
         backend = MOD.make_backend(a.backend, a.model, **kw)
     except ValueError:
         raise SystemExit(f"unknown backend: {a.backend} "
-                         f"(have: {', '.join(sorted(MOD._BACKENDS))})")
+                         f"(have: {', '.join(MOD.known_backends())})")
 
     # A real backend needs PNG frames. Without --frames the policy cannot
     # rasterise anything and would send text only, which is not the experiment.
@@ -227,6 +228,33 @@ def cmd_leaderboard(a):
               f"{_p(r['hit_wall_rate']):>7} {_p(r['invalid_rate']):>7} {r['n_episodes']:>5}")
 
 
+def cmd_cost(a):
+    """Estimate a run's cost, or account for what past runs actually spent.
+
+    Two modes, because the questions are different:
+      --estimate  what will this cost, before paying for it
+      (default)   what did these runs cost, and how do they compare per unit
+                  of progress
+    """
+    if a.estimate:
+        if not a.dataset:
+            raise SystemExit("--estimate needs --dataset")
+        if not a.model:
+            raise SystemExit("--estimate needs --model")
+        dataset = D.load_manifest(a.dataset)
+        est = CO.estimate(dataset, a.model, n_episodes=a.limit or None,
+                          max_turns=a.max_turns or None,
+                          usd_per_1k_in=a.price_in,
+                          usd_per_1k_out=a.price_out)
+        print(CO.format_estimate(est, as_json=a.json))
+        return
+
+    if not os.path.isdir(a.dir):
+        raise SystemExit(f"no such results dir: {a.dir}")
+    roll = CO.rollup(a.dir, model=a.model)
+    print(CO.format_rollup(roll, as_json=a.json))
+
+
 def cmd_runs(a):
     """List every run in a directory with its lifecycle status.
 
@@ -349,8 +377,12 @@ def main(argv=None):
     g.set_defaults(func=cmd_generate)
 
     r = sub.add_parser("run")
+    # Any provider in drawtle/providers.json is accepted. The list is not
+    # hardcoded here: a provider added to the registry must be runnable
+    # without editing this file, or the registry is not really declarative.
     r.add_argument("--backend", required=True,
-                   choices=["mock", "openai", "anthropic", "gemini"])
+                   help="mock | any provider in drawtle/providers.json "
+                        "(see: python -m drawtle.catalog providers)")
     r.add_argument("--model", required=True)
     r.add_argument("--dataset", required=True)
     r.add_argument("--out-dir", default="results")
@@ -396,6 +428,24 @@ def main(argv=None):
     stt.add_argument("--run", required=True)
     stt.add_argument("--dir", default="results")
     stt.set_defaults(func=cmd_status)
+
+    cst = sub.add_parser("cost", help="estimate a run's cost, or total what "
+                                      "past runs spent")
+    cst.add_argument("--dir", default="results")
+    cst.add_argument("--model", default=None,
+                     help="filter the rollup to one model")
+    cst.add_argument("--estimate", action="store_true",
+                     help="project cost for a run instead of totalling past runs")
+    cst.add_argument("--dataset", default=None, help="for --estimate")
+    cst.add_argument("--limit", type=int, default=0,
+                     help="for --estimate: episodes to project")
+    cst.add_argument("--max-turns", type=int, default=0)
+    cst.add_argument("--price-in", type=float, default=None,
+                     help="USD per 1K input tokens, overriding the local table")
+    cst.add_argument("--price-out", type=float, default=None,
+                     help="USD per 1K output tokens, overriding the local table")
+    cst.add_argument("--json", action="store_true")
+    cst.set_defaults(func=cmd_cost)
 
     a = p.parse_args(argv)
     a.config_overrides = {}

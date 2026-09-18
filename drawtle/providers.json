@@ -1,0 +1,215 @@
+{
+  "_doc": [
+    "Declarative provider registry. Adding a provider is an edit to this file,",
+    "not a new class in models.py. Anything that speaks the OpenAI chat-",
+    "completions shape is `protocol: openai` and needs only a url and a key list.",
+    "",
+    "Fields:",
+    "  protocol      transport shape: `openai` (chat/completions) or `anthropic`",
+    "                (messages). These are the only two we can speak; a provider",
+    "                with a bespoke protocol needs a backend class, not an entry.",
+    "  url           full endpoint for the chat call. `{model}` is substituted if",
+    "                present (some providers put the model in the path).",
+    "  key_env       environment variables checked in order. Empty list = the",
+    "                provider needs no key (a local server).",
+    "  models_url    endpoint returning the model list. `null` = we cannot",
+    "                discover models here; the local table is the only source.",
+    "  model_provider  which label(s) this provider's models carry in",
+    "                model_registry.json, when it differs from the backend name",
+    "                (Gemini's models are labelled `google`). Omit when they",
+    "                match. Used only for counting; never for resolution.",
+    "  models_path   how to pull ids out of the discovery payload. `data[].id`",
+    "                is the OpenAI shape; `models[].name` is Gemini's.",
+    "  auth          header style for BOTH the chat call and discovery:",
+    "                `bearer`, `x-api-key`, or `query` (key appended as ?key=).",
+    "  openai_compat true when the provider implements the OpenAI wire format",
+    "                including the `usage` object. Informational: it tells a",
+    "                reader whether token counts are likely to be measured.",
+    "  usage_fields  which keys carry the counts in the response `usage` object,",
+    "                as [input_keys, output_keys]. `null` means we have not",
+    "                verified a usage block exists for this provider -- which is",
+    "                NOT the same as \"there is none\". Unverified providers get",
+    "                the default OpenAI names and their counts are labelled",
+    "                `measured` only if the keys are actually present.",
+    "  context_note  free text, shown by `catalog show`. Anything about this",
+    "                provider a reader would otherwise have to look up.",
+    "  self_hosted   true for a server the user runs (Ollama, vLLM, LM Studio).",
+    "                These are exempt from the missing-key error by design.",
+    "  rate_limit    published limit as a string, or null if not published.",
+    "                Never a guess -- see the rule in model_registry.json.",
+    "",
+    "Never put a key in this file. It is versioned with the repo."
+  ],
+  "version": 1,
+  "updated": "2026-09-18",
+  "providers": {
+    "mock": {
+      "protocol": "mock",
+      "url": null,
+      "key_env": [],
+      "models_url": null,
+      "models_path": null,
+      "auth": "none",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "Synthetic. No network, no key, fully deterministic.",
+      "self_hosted": true,
+      "rate_limit": null
+    },
+
+    "openai": {
+      "protocol": "openai",
+      "url": "https://api.openai.com/v1/chat/completions",
+      "key_env": ["OPENAI_API_KEY"],
+      "models_url": "https://api.openai.com/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens", "input_tokens"], ["completion_tokens", "output_tokens"]],
+      "context_note": "Reference implementation of the wire format.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "anthropic": {
+      "protocol": "anthropic",
+      "url": "https://api.anthropic.com/v1/messages",
+      "key_env": ["ANTHROPIC_API_KEY"],
+      "models_url": "https://api.anthropic.com/v1/models",
+      "models_path": "data[].id",
+      "auth": "x-api-key",
+      "openai_compat": false,
+      "usage_fields": [["input_tokens", "prompt_tokens"], ["output_tokens", "completion_tokens"]],
+      "context_note": "Native Messages API. Not OpenAI-compatible; own protocol.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "gemini": {
+      "protocol": "openai",
+      "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "key_env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+      "model_provider": ["google", "gemini"],
+      "models_url": "https://generativelanguage.googleapis.com/v1beta/models",
+      "models_path": "models[].name",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens", "input_tokens"], ["completion_tokens", "output_tokens"]],
+      "context_note": "Reached through Google's OpenAI-compatible layer, so the body and auth header match OpenAI. Genuine free tier with image input. Rate limits are per project and shown per account in AI Studio rather than published as fixed numbers.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "internlm": {
+      "protocol": "openai",
+      "url": "https://chat.intern-ai.org.cn/api/v1/chat/completions",
+      "key_env": ["INTERNLM_API_KEY", "INTERN_API_KEY"],
+      "models_url": null,
+      "models_path": null,
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "context_note": "Base https://chat.intern-ai.org.cn/api/v1/ -- note this is a DIFFERENT host from the console and docs site (internlm.intern-ai.org.cn), which is the mistake to make here. Auth is `Authorization: Bearer <token>`; the OpenAI SDK form takes the token WITHOUT the Bearer prefix. Published rate limit: 30 requests/min/user. 256K context on intern-s2, intern-s1-pro and intern-s2-preview-35b; 32K on intern-s1 and intern-s1-mini. Multimodal via content arrays. The published request/response reference does NOT document a `usage` object: until a real call confirms one, treat cost as unknown and token counts as estimated. No pricing is published. `thinking_mode` (bool) is accepted by the s2/s1 families and defaults ON, which costs output tokens -- this registry does not expose it, so a run gets the default.",
+      "self_hosted": false,
+      "rate_limit": "30 req/min/user"
+    },
+
+    "ollama": {
+      "protocol": "openai",
+      "url": "http://localhost:11434/v1/chat/completions",
+      "key_env": [],
+      "models_url": "http://localhost:11434/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "Local server; no key required. Ollama's OpenAI-compatible route reports usage, so counts are measured. Context window is set by the Modelfile per model, not by the server -- check with `ollama show <model>`.",
+      "self_hosted": true,
+      "rate_limit": null
+    },
+
+    "vllm": {
+      "protocol": "openai",
+      "url": "http://localhost:8000/v1/chat/completions",
+      "key_env": ["VLLM_API_KEY"],
+      "models_url": "http://localhost:8000/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "Self-hosted OpenAI-compatible server. Started with --api-key it requires one; started without, it accepts any string. key_env is empty-by-default only if you run it keyless.",
+      "self_hosted": true,
+      "rate_limit": null
+    },
+
+    "openrouter": {
+      "protocol": "openai",
+      "url": "https://openrouter.ai/api/v1/chat/completions",
+      "key_env": ["OPENROUTER_API_KEY"],
+      "models_url": "https://openrouter.ai/api/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "Aggregator: one key reaches many providers' models, addressed as `vendor/model`. Model metadata (including per-model context windows) IS published on the discovery endpoint, which makes it the one provider where context_window is discoverable rather than tabled.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "groq": {
+      "protocol": "openai",
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "key_env": ["GROQ_API_KEY"],
+      "models_url": "https://api.groq.com/openai/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "Very high throughput on open-weight models. Model names are the open-weight ones, not vendor-branded.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "deepseek": {
+      "protocol": "openai",
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "key_env": ["DEEPSEEK_API_KEY"],
+      "models_url": "https://api.deepseek.com/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "OpenAI-compatible. Pricing and context windows are published on the provider's own docs page, not on the models endpoint.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "mistral": {
+      "protocol": "openai",
+      "url": "https://api.mistral.ai/v1/chat/completions",
+      "key_env": ["MISTRAL_API_KEY"],
+      "models_url": "https://api.mistral.ai/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "OpenAI-compatible. Vision-capable models are available on the paid tier and are named with a `-vision` or `pixtral` suffix -- verify per model before running a frame-based mode.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "together": {
+      "protocol": "openai",
+      "url": "https://api.together.xyz/v1/chat/completions",
+      "key_env": ["TOGETHER_API_KEY"],
+      "models_url": "https://api.together.xyz/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "Hosts many open-weight models including vision ones. Per-model pricing is on the discovery payload for this provider.",
+      "self_hosted": false,
+      "rate_limit": null
+    }
+  }
+}

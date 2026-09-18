@@ -44,6 +44,19 @@ STDLIB = {
 }
 
 
+# Data files loaded at RUNTIME rather than imported. A missing one does not
+# fail at import time -- it fails mid-run, or worse, degrades silently to a
+# default that changes the measurement. `providers.json` is the sharpest case:
+# without it the bench falls back to four built-in backends and an InternLM run
+# would be reported as an unknown backend, which reads as a typo rather than a
+# missing file in the image.
+REQUIRED_DATA = [
+    "drawtle/providers.json",
+    "drawtle/model_registry.json",
+    "configs/default.json",
+]
+
+
 def local_imports(path):
     """Top-level module names imported by a Python file, repo-local only.
 
@@ -80,6 +93,20 @@ def copied_paths(dockerfile_text):
                 continue
             out.add(src.rstrip("/"))
     return out
+
+
+def _dir_is_copied(rel_path, copied):
+    """Is a file inside a COPYed directory, or itself COPYed?
+
+    `COPY drawtle/ ./drawtle/` brings every file under `drawtle/` with it, so a
+    check that only compares top-level names would miss nothing here but would
+    also be unable to say so. This resolves the question for a full relative
+    path.
+    """
+    if rel_path in copied:
+        return True
+    top = rel_path.split("/")[0]
+    return top in copied
 
 
 def main():
@@ -126,6 +153,23 @@ def main():
                   f"succeeds and the container fails at import time.")
         return 1
     print("  PASS: every repo-local module bench.py imports is present in the image.")
+
+    # Runtime data files. These do not fail at import, so nothing else catches
+    # them: a missing providers.json degrades to four built-in backends and a
+    # missing model_registry.json silently makes every price unknown.
+    data_problems = []
+    for rel in REQUIRED_DATA:
+        if not os.path.exists(os.path.join(ROOT, *rel.split("/"))):
+            data_problems.append((rel, "does not exist in the repo"))
+        elif not _dir_is_copied(rel, copied):
+            data_problems.append((rel, "is not COPYed into the image"))
+    if data_problems:
+        for rel, why in data_problems:
+            print(f"  FAIL: data file {rel} {why}.")
+            print("        It is loaded at run time, so the build succeeds and "
+                  "the failure appears mid-run.")
+        return 1
+    print(f"  PASS: all {len(REQUIRED_DATA)} runtime data files are in the image.")
 
     # The rasteriser is optional for the mock backend but load-bearing for any
     # real vision backend. Warn once rather than fail, because a text-only or

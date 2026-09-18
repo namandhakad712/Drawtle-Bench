@@ -38,13 +38,64 @@ class ModelResponse:
     #: False when no source-backed price was available for this model, so a
     #: 0.0 in cost_usd means "unknown", not "free".
     cost_known: bool = True
+    #: "measured" when the provider returned a usage block, "estimated" when the
+    #: counts were inferred locally from text length. A provider that returns no
+    #: usage at all is not a provider whose tokens are unknown -- it is one whose
+    #: tokens must be estimated, and the difference has to survive into the log.
+    #: Never set this to "measured" for a number we computed ourselves.
+    token_source: str = "measured"
     raw: dict = field(default_factory=dict)
+
+
+#: Sentinel for "the provider gave us no usage block". Kept distinct from 0 so a
+#: backend can tell "reported zero output tokens" (real, e.g. a filtered reply)
+#: from "reported nothing at all" (needs an estimate).
+NO_USAGE = object()
 
 
 # Rough token estimate when the API does not report usage. Cheap and good enough
 # for cost caps; replace with tiktoken if installed for accuracy.
 def _est_tokens(text):
     return max(1, len(text) // 4)
+
+
+def _resolve_usage(usage, prompt_text, completion_text,
+                   in_keys=("prompt_tokens", "input_tokens"),
+                   out_keys=("completion_tokens", "output_tokens")):
+    """Return (prompt_tokens, completion_tokens, token_source) from a usage dict.
+
+    One place decides how a provider's numbers are read, because the previous
+    version decided it inline in each backend and got it wrong in a way that
+    survived into every committed result: a missing field fell back to
+    `_est_tokens(completion_text)` for BOTH counts, so an unmeasured input was
+    reported as an estimate of the output.
+
+    Rules, in order:
+      1. The provider's own numbers, when present. Either field may be present
+         alone -- some providers report output only.
+      2. Whatever is still missing is estimated from the corresponding text, and
+         the response is then labelled `estimated` -- a partial measurement is
+         not a measurement.
+
+    `usage` is accepted as None or {} and both mean "no usage block".
+    """
+    u = usage or {}
+    pin = pout = None
+    for k in in_keys:
+        if isinstance(u.get(k), int) and u[k] >= 0:
+            pin = u[k]
+            break
+    for k in out_keys:
+        if isinstance(u.get(k), int) and u[k] >= 0:
+            pout = u[k]
+            break
+    if pin is not None and pout is not None:
+        return pin, pout, "measured"
+    if pin is None:
+        pin = _est_tokens(prompt_text)
+    if pout is None:
+        pout = _est_tokens(completion_text)
+    return pin, pout, "estimated"
 
 
 # Default price per 1K tokens (USD). Override per model in the run config.
@@ -246,11 +297,21 @@ class MockBackend(ModelBackend):
 
     def _wrap(self, payload, lat):
         ch = payload["choices"][0]["message"]["content"]
-        u = payload.get("usage", {}) or {}
-        pin = u.get("prompt_tokens") or _est_tokens(ch)
-        pout = u.get("completion_tokens") or _est_tokens(ch)
+        u = payload.get("usage") or {}
+        # The mock reports its own synthetic counts, so it is a "measured"
+        # backend by this rule. That is the point: a run against the mock must
+        # exercise the same measured path a real provider takes, or the metric
+        # wiring is untested until the first paid call.
+        pin = u.get("prompt_tokens")
+        pout = u.get("completion_tokens")
+        src = "measured" if (pin is not None and pout is not None) else "estimated"
+        if pin is None:
+            pin = _est_tokens(ch)
+        if pout is None:
+            pout = _est_tokens(ch)
         return ModelResponse(text=ch, prompt_tokens=pin, completion_tokens=pout,
-                             cost_usd=self._cost(pin, pout), latency_s=lat)
+                             cost_usd=self._cost(pin, pout), latency_s=lat,
+                             token_source=src)
 
 
 class OpenAIBackend(ModelBackend):
@@ -280,6 +341,13 @@ class OpenAIBackend(ModelBackend):
         if image_b64:
             body["messages"] = list(messages)
             body["messages"][-1] = {"role": "user", "content": content}
+        # Keep the text we are about to send, so `_wrap` can estimate tokens
+        # against the REQUEST when the provider gives no usage block. Estimating
+        # from the response text (the old behaviour) reported the input count as
+        # a function of the output -- which is both wrong and, on this bench,
+        # wrong in the direction that understates cost.
+        self._last_prompt_text = "\n".join(
+            str(m.get("content", "")) for m in messages)
         req = urllib.request.Request(
             self.BASE, data=json.dumps(body).encode(),
             headers={"Authorization": f"Bearer {self.api_key}",
@@ -288,15 +356,13 @@ class OpenAIBackend(ModelBackend):
             return json.loads(r.read().decode())
 
     def _wrap(self, payload, lat):
-        ch = payload["choices"][0]["message"]["content"]
-        u = payload.get("usage", {}) or {}
-        pin, pout = u.get("prompt_tokens", 0), u.get("completion_tokens", 0)
-        if not pin:
-            pin = _est_tokens(ch)
-        if not pout:
-            pout = _est_tokens(ch)
+        ch = payload["choices"][0]["message"]["content"] or ""
+        # Prompt text for the estimator: the request body, not the response.
+        prompt_text = getattr(self, "_last_prompt_text", "")
+        pin, pout, src = _resolve_usage(payload.get("usage"), prompt_text, ch)
         return ModelResponse(text=ch, prompt_tokens=pin, completion_tokens=pout,
-                             cost_usd=self._cost(pin, pout), latency_s=lat, raw=payload)
+                             cost_usd=self._cost(pin, pout), latency_s=lat,
+                             token_source=src, raw=payload)
 
 
 class AnthropicBackend(ModelBackend):
@@ -331,6 +397,8 @@ class AnthropicBackend(ModelBackend):
         else:
             body["messages"] = [{"role": t["role"], "content": [
                 {"type": "text", "text": t["content"]}]} for t in turns]
+        self._last_prompt_text = sys_text + "\n".join(
+            str(t.get("content", "")) for t in turns)
         req = urllib.request.Request(
             self.BASE, data=json.dumps(body).encode(),
             headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01",
@@ -340,14 +408,13 @@ class AnthropicBackend(ModelBackend):
 
     def _wrap(self, payload, lat):
         txt = "".join(b.get("text", "") for b in payload.get("content", []))
-        u = payload.get("usage", {}) or {}
-        pin, pout = u.get("input_tokens", 0), u.get("output_tokens", 0)
-        if not pin:
-            pin = _est_tokens(txt)
-        if not pout:
-            pout = _est_tokens(txt)
+        prompt_text = getattr(self, "_last_prompt_text", "")
+        pin, pout, src = _resolve_usage(payload.get("usage"), prompt_text, txt,
+                                        in_keys=("input_tokens", "prompt_tokens"),
+                                        out_keys=("output_tokens", "completion_tokens"))
         return ModelResponse(text=txt, prompt_tokens=pin, completion_tokens=pout,
-                             cost_usd=self._cost(pin, pout), latency_s=lat, raw=payload)
+                             cost_usd=self._cost(pin, pout), latency_s=lat,
+                             token_source=src, raw=payload)
 
 
 class GeminiBackend(OpenAIBackend):
@@ -379,22 +446,209 @@ class GeminiBackend(OpenAIBackend):
     # by this bench.
 
 
-_BACKENDS = {"mock": MockBackend, "openai": OpenAIBackend,
-             "anthropic": AnthropicBackend, "gemini": GeminiBackend}
+#: Hand-written backends. Everything else is served by GenericOpenAIBackend
+#: from the declarative registry in providers.json. A class is only warranted
+#: when the transport differs -- not when only the URL does.
+_CLASSES = {"mock": MockBackend, "openai": OpenAIBackend,
+            "anthropic": AnthropicBackend, "gemini": GeminiBackend}
+
+
+def providers():
+    """The declarative provider registry. Returns {name: spec}."""
+    global _PROVIDERS
+    if _PROVIDERS is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "providers.json")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                _PROVIDERS = json.load(fh).get("providers", {})
+        except (OSError, ValueError) as e:
+            sys.stderr.write(f"warning: could not read providers.json ({e}); "
+                             f"falling back to built-in backends\n")
+            _PROVIDERS = {}
+    return _PROVIDERS
+
+
+_PROVIDERS = None
+
+
+def provider_spec(kind):
+    """Spec for one provider, or None."""
+    return providers().get(kind)
+
+
+def known_backends():
+    """Every backend name this build can construct, sorted."""
+    return sorted(set(_CLASSES) | set(providers()))
+
+
+class GenericOpenAIBackend(ModelBackend):
+    """Any provider that speaks the OpenAI chat-completions wire format.
+
+    Constructed from a `providers.json` entry rather than written by hand,
+    because the differences between these providers are data: a URL, a list of
+    environment variables, and occasionally a different name for the token
+    counts. None of that justifies a class, and a class per provider means the
+    twenty-first provider is the one that never gets added.
+
+    The transport is the same as OpenAIBackend, so this inherits it. It
+    overrides what actually varies: the endpoint, whether the model goes in the
+    path, and which usage keys to read.
+    """
+
+    def __init__(self, model, provider, api_key=None, **kw):
+        spec = provider_spec(provider)
+        if not spec:
+            raise ValueError(f"unknown provider {provider!r}")
+        if spec.get("protocol") not in ("openai", "mock"):
+            raise ValueError(
+                f"provider {provider!r} speaks {spec.get('protocol')!r}, which "
+                f"the generic OpenAI transport cannot drive")
+        self.provider = provider
+        self.spec = spec
+        self.name = provider
+        # A URL containing `{model}` addresses the model in the path. Only
+        # substituted when the placeholder is actually there, so a model name
+        # with a slash (OpenRouter's `vendor/model`) is never silently rewritten.
+        url = spec.get("url") or ""
+        self.url = url.replace("{model}", model) if "{model}" in url else url
+        # `key_env` comes from the spec, so `require_key` and preflight agree
+        # with the registry without either being taught about the provider.
+        self.key_env = tuple(spec.get("key_env") or ())
+        # `self_hosted` servers commonly accept any key or none; erroring out
+        # for a missing one would refuse a run that would have worked.
+        self.required_key = bool(self.key_env) and not spec.get("self_hosted")
+        if api_key is None and self.key_env:
+            api_key = _resolve_provider_key(provider, self.key_env)
+        super().__init__(model, api_key=api_key, **kw)
+
+    def require_key(self):
+        if self.required_key and not self.api_key:
+            raise SystemExit(
+                f"provider {self.name!r} needs an API key and none is set.\n"
+                f"  looked for: {', '.join(self.key_env)}\n"
+                f"  set one, e.g.:  export {self.key_env[0]}=...\n"
+                f"  or store it once:  python -m drawtle.catalog set-key "
+                f"{self.name}\n"
+                f"  or check the setup first:  python analysis/preflight.py "
+                f"--backend {self.name}")
+
+    def _post(self, messages, temperature=0.0, max_tokens=256, image_b64=None,
+              **kw):
+        if not self.url:
+            raise SystemExit(
+                f"provider {self.name!r} has no endpoint in providers.json")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        body = {"model": self.model, "messages": messages,
+                "temperature": temperature, "max_tokens": max_tokens}
+        if self.effort and self.effort_field:
+            body[self.effort_field] = self.effort
+        if image_b64:
+            content = [{"type": "text", "text": m["content"]} for m in messages]
+            content.append({"type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{image_b64}"}})
+            body["messages"] = list(messages)
+            body["messages"][-1] = {"role": "user", "content": content}
+        self._last_prompt_text = "\n".join(
+            str(m.get("content", "")) for m in messages)
+        req = urllib.request.Request(
+            self.url, data=json.dumps(body).encode(),
+            headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
+            return json.loads(r.read().decode())
+
+    def _wrap(self, payload, lat):
+        # Some providers return a `choices` array that is empty or lacks
+        # `message` -- a content filter is the usual cause. Surfacing that as a
+        # clear error beats an IndexError from inside the parse.
+        choices = payload.get("choices") or []
+        if not choices:
+            err = payload.get("error") or payload
+            raise RuntimeError(
+                f"{self.name} returned no choices "
+                f"({json.dumps(err)[:300]})")
+        ch = (choices[0].get("message") or {}).get("content") or ""
+        if isinstance(ch, list):        # some compat layers return content blocks
+            ch = "".join(b.get("text", "") for b in ch if isinstance(b, dict))
+        in_keys, out_keys = self._usage_keys()
+        prompt_text = getattr(self, "_last_prompt_text", "")
+        pin, pout, src = _resolve_usage(payload.get("usage"), prompt_text, ch,
+                                        in_keys=in_keys, out_keys=out_keys)
+        return ModelResponse(text=ch, prompt_tokens=pin, completion_tokens=pout,
+                             cost_usd=self._cost(pin, pout), latency_s=lat,
+                             token_source=src, raw=payload)
+
+    def _usage_keys(self):
+        """Which `usage` keys carry the counts for this provider.
+
+        Defaults to the OpenAI names. A provider whose `usage_fields` is null
+        has not been verified to return a usage block at all -- in that case the
+        OpenAI names are tried anyway, and if the call comes back without them
+        `_resolve_usage` labels the counts `estimated`. Guessing wrong here
+        degrades to an honest estimate rather than to a wrong measurement.
+        """
+        uf = self.spec.get("usage_fields")
+        if not uf:
+            return ("prompt_tokens", "input_tokens"), \
+                   ("completion_tokens", "output_tokens")
+        return tuple(uf[0]), tuple(uf[1])
+
+
+def _resolve_provider_key(provider, key_env):
+    """Environment first, then the stored credential file. Never the reverse.
+
+    An explicit `export` must always beat a file, or a user cannot override a
+    stale stored key without deleting it.
+    """
+    for var in key_env:
+        v = os.environ.get(var)
+        if v:
+            return v
+    for var in key_env:
+        v = _stored_credential(provider, var)
+        if v:
+            return v
+    return None
+
+
+def _stored_credential(provider, var):
+    """Read a key from the credential file, or None. Never raises.
+
+    Imported lazily and defensively: the credential store lives in `catalog`,
+    which imports nothing from here, so a circular import is possible in
+    principle and a missing key must never be the reason a mock run fails.
+    """
+    try:
+        from . import catalog as _CAT
+        key, _src = _CAT.resolve_key(provider)
+        return key
+    except Exception:
+        return None
 
 
 def make_backend(kind, model, **kw):
-    """Factory. kind in _BACKENDS."""
-    if kind not in _BACKENDS:
-        raise ValueError(f"unknown backend {kind!r}; have {sorted(_BACKENDS)}")
-    return _BACKENDS[kind](model, **kw)
+    """Factory. Prefers a hand-written backend, falls back to the registry."""
+    if kind in _CLASSES:
+        return _CLASSES[kind](model, **kw)
+    if kind in providers():
+        return GenericOpenAIBackend(model, kind, **kw)
+    raise ValueError(
+        f"unknown backend {kind!r}; have {', '.join(known_backends())}")
 
 
 def backend_key_env(kind):
     """Environment variables a backend reads its key from (empty if none).
 
     Used by the CLI and by `analysis/preflight.py` so that the list of accepted
-    variable names lives in exactly one place.
+    variable names lives in exactly one place. The registry is consulted for
+    providers with no hand-written class, which is what keeps a newly added
+    provider visible to preflight without touching it.
     """
-    cls = _BACKENDS.get(kind)
-    return tuple(getattr(cls, "key_env", ())) if cls else ()
+    cls = _CLASSES.get(kind)
+    if cls is not None:
+        return tuple(getattr(cls, "key_env", ()))
+    spec = provider_spec(kind)
+    return tuple(spec.get("key_env") or ()) if spec else ()

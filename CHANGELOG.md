@@ -1,5 +1,65 @@
 # Changelog
 
+## v2.5.0 — provider-agnostic backends, correct token accounting, cost per session
+- **Token accounting was wrong, and wrong in a way that produced plausible
+  numbers.** `runner._turn_rec` wrote `prompt_tokens = input + output` and
+  `completion_tokens = 0`; `stats.aggregate` then added those two fields
+  together, so every `mean_tokens_per_turn` was **double** the truth and output
+  tokens were never reported at all. On the committed `mock-opt` run the
+  inflation was **1.14x** (44.09 reported, 38.70 correct). Records now carry a
+  real split — `prompt_tokens`, `completion_tokens`, `total_tokens` — and the
+  reader no longer re-adds them.
+- **`token_source` on every response and record: `measured` or `estimated`.**
+  A provider that returns no `usage` block (InternLM's published reference does
+  not document one) gets counts estimated from the *request* text and labelled
+  as an estimate. The old code estimated from the response text, which reported
+  the input count as a function of the output. A partial measurement is
+  labelled `estimated`, not `measured`.
+- **Legacy logs stay readable and stay labelled.** A record written before this
+  version has no `total_tokens` key; its `prompt_tokens` is the exact combined
+  total, so the total is preserved exactly and only the split is apportioned
+  from the recorded prose. Those runs report `token_source: estimated` rather
+  than being silently read as input-only. `results/mock-opt.jsonl` is retained
+  as the fixture and asserted against.
+- **`drawtle/providers.json` — a declarative provider registry.** Endpoint,
+  auth style, key variables, model-discovery route, and the names of the token
+  fields. Twelve providers ship: OpenAI, Anthropic, Gemini, **InternLM**,
+  Ollama, vLLM, OpenRouter, Groq, DeepSeek, Mistral, Together, mock. Adding one
+  is an edit to this file — no new class. `models.make_backend` prefers a
+  hand-written backend and otherwise constructs `GenericOpenAIBackend` from the
+  spec. The test suite asserts that a provider existing *only* in the registry
+  runs.
+- **`bench.py run --backend` accepts any registered provider.** The choices list
+  was hardcoded; it is now resolved from the registry, so a provider added to the
+  file is runnable without editing the CLI.
+- **InternLM support.** Base `https://chat.intern-ai.org.cn/api/v1/`, bearer
+  auth, 30 req/min/user. Six models tabled (`intern-s2` 256K, `intern-s1` 32K,
+  `internvl3.5-241b-a28b` 32K, …). Two facts are recorded as unknown rather than
+  assumed: it publishes **no pricing** (so cost is `cost_known: false`) and its
+  request/response reference documents **no `usage` object** (so token counts are
+  estimated until a real call proves otherwise).
+- **`drawtle/cost.py` + `bench.py cost`.** Before a run: `--estimate` projects
+  tokens and dollars from the dataset, the model's window and its price, and
+  states the basis of every assumption. After: a rollup of what past runs cost,
+  with **cost per unit of progress** so runs of different length are comparable.
+  Two rules are enforced rather than documented — an unpriced model reports
+  `UNKNOWN` instead of `$0` and is excluded from any grand total, and a run that
+  did not finish cleanly has its cost marked as covering only the turns written.
+  The rollup re-derives figures from a run's JSONL when its stored summary
+  predates the token split, so ten historical runs are readable instead of
+  showing zero tokens.
+- **`python -m drawtle.catalog providers`** lists every supported provider with
+  its protocol, auth style, whether a key is required, how many models are tabled
+  and whether model discovery is available.
+- **`analysis/test_hosted_and_accounting.py`** — 60 checks over the usage
+  resolution rules, the double-count regression, legacy logs, mixed logs, and the
+  registry. Falsified: re-introducing the original `prompt_tokens: in + out`
+  line makes it fail. Wired into CI.
+- **`analysis/check_docker.py`** now also asserts the runtime data files
+  (`providers.json`, `model_registry.json`, `configs/default.json`) reach the
+  image. These fail at run time rather than import time, so nothing else caught
+  them; verified to fail when `COPY drawtle/` is narrowed.
+
 ## v2.4.0 — onboarding guide, Docker envelope fixed, dashboard empty-state
 - **`GETTING_STARTED.md`** — a complete walkthrough for a first-time user, from
   an empty checkout to a finished run, plus a real-model path. Every command in

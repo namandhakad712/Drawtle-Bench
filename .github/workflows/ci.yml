@@ -42,6 +42,9 @@ jobs:
       - name: Run lifecycle (status, resume, log integrity, transcript)
         run: python analysis/test_lifecycle.py
 
+      - name: Accounting and provider registry (token split, any-provider)
+        run: python analysis/test_hosted_and_accounting.py
+
       - name: Docker image consistency (does the image contain what bench.py imports?)
         run: python analysis/check_docker.py
 
