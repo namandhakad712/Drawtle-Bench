@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.1.0 — figures, free multimodal backend, docs design system
+- **`docs/make_images.py`** — five documentation figures generated from the
+  shipped renderer, so an image cannot drift from the engine it illustrates:
+  the observation itself, four consecutive turns (Fix A), current-vs-stale
+  frames (the measurement in one image), grid sizes, and exit pairs. Writes SVG
+  and PNG; `--no-raster` writes SVG only for CI.
+- **`analysis/preflight.py`** — verifies rasteriser → credential → live
+  multimodal call → parser, stopping at the first failure and naming the cause.
+  Catches a broken setup before a run instead of during one.
+- **`gemini` backend** — a free, genuinely multimodal provider via Google's
+  OpenAI-compatible endpoint, reusing `OpenAIBackend`'s transport unchanged.
+  `backend_key_env()` is now the single source of truth for a backend's
+  environment variables.
+- **Fixed — missing key produced an opaque `HTTP 400`.** The request went out as
+  `Authorization: Bearer None` and failed inside urllib. `ModelBackend` now
+  validates the credential before any network work. This affected `openai` and
+  `anthropic` as well, not only the new backend.
+- **Fixed — three `docs/build.py` converter defects**, all of which emitted valid
+  HTML and so were invisible on the page: no image support at all; repo-relative
+  image paths that work on github.com but 404 from the built site; and a caption
+  heuristic that inferred captions from the following paragraph and silently ate
+  the first line of body text after every figure.
+- **Docs design system** — custom-property theme with dark mode, sticky masthead
+  and nav, card/stat/grid components, typographic scale, and figures that break
+  out of the text measure.
+- **CI** regenerates the figure SVGs and fails if the committed ones differ.
+
 ## v2.0.2 — rasteriser unblocked
 - `drawtle/frames.py` now **auto-discovers** a Chromium build on disk instead of
   failing when Playwright's pinned revision is absent, and reports every launch
