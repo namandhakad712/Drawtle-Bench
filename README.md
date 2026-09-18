@@ -154,6 +154,35 @@ limit), so a broken setup is found before a run rather than during one. The free
 tier's limits are not published by Google and are per-project — see
 `TESTING.md` §5.
 
+### Models, limits, and keys
+
+```bash
+python -m drawtle.catalog list              # model table: context, output, price, effort
+python -m drawtle.catalog fetch gemini      # ask the provider which models exist
+python -m drawtle.catalog check             # verify keys and reachability
+python -m drawtle.catalog set-key gemini    # store a key once, outside the repo
+```
+
+Discovery endpoints return **model ids only** — no context windows, no output
+limits, no prices. Those live in `drawtle/model_registry.json`, sourced by hand
+and annotated with where each number came from, because a limit with no
+provenance is a rumour. A `null` there means unknown and renders as `-`, never
+as `0`: a zero context window reads as "unusable" and a zero price as "free",
+and both would be false.
+
+`--effort low|medium|high` is sent only to models that declare support for it,
+and an unsupported level is rejected rather than clamped.
+
+Every run prints its resolved capabilities before it spends anything:
+
+```
+backend  : gemini / gemini-2.5-flash
+context  : 1,048,576 in / 65536 out
+price    : $0.0003/1k in, $0.0025/1k out
+run_id   : gemini-2.5-flash-1789763452
+writing  : results/gemini-2.5-flash-1789763452.jsonl
+```
+
 ## Validation (no model called)
 
 With the mock backend the floor check passes: **Optimal = 100.0%** (CI 100–100),
@@ -246,9 +275,14 @@ machine can rebuild.
   numbers. A real model is a backend + API key away (`ModelBackend` is the seam);
   `gemini` is wired and needs no payment, only a key. This is the single most
   important limitation — see `PAPER.md` §8.2.
-- **Cost reporting for `gemini` reads 0.0** — `DEFAULT_PRICES` has no Gemini
-  entry, so its runs report no cost. Token counts are still logged. A run
-  budgeted on reported cost will mis-budget that backend.
+- **Model limits are hand-sourced and can go stale.** The discovery endpoints
+  report model ids only; context windows, output limits and prices come from
+  `drawtle/model_registry.json`, which records its source and check date per
+  entry. Set limits are verified; several carry-over entries are marked
+  unverified, and `python -m drawtle.catalog price-update` lists every gap.
+- **Cost is `cost_known`-qualified.** A `total_cost_usd` of `0.0` means "free"
+  only when `cost_known` is true; otherwise no price was available and the zero
+  is not a measurement.
 - **The CLI cannot produce a text-only baseline** — `bench.py run` has no
   `--no-vision` flag. `TESTING.md` §3.
 - **Completion saturates** in navigation mode (0.95 optimal vs 0.90 stale), so

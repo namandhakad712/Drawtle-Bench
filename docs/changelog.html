@@ -29,6 +29,7 @@
 <a href="changelog.html" class="on">Changelog</a>
 <a href="contributing.html">Contributing</a>
 <div class="grp">On this page</div><div class="toc">
+<a href="#v2.2.0-model-discovery-capability-metadata-credential-storage">v2.2.0 — model discovery, capability metadata, credential storage</a>
 <a href="#v2.1.0-figures-free-multimodal-backend-docs-design-system">v2.1.0 — figures, free multimodal backend, docs design system</a>
 <a href="#v2.0.2-rasteriser-unblocked">v2.0.2 — rasteriser unblocked</a>
 <a href="#v2.0.1-paper-docs-site-and-a-readiness-audit">v2.0.1 — paper, docs site, and a readiness audit</a>
@@ -39,6 +40,37 @@
 </nav>
 <main>
 <h1 id="changelog">Changelog<a class="ah" href="#changelog" aria-label="link">#</a></h1>
+<h2 id="v2.2.0-model-discovery-capability-metadata-credential-storage">v2.2.0 — model discovery, capability metadata, credential storage<a class="ah" href="#v2.2.0-model-discovery-capability-metadata-credential-storage" aria-label="link">#</a></h2>
+<ul>
+<li><strong><code>drawtle/catalog.py</code></strong> — <code>list</code> / <code>fetch</code> / <code>show</code> / <code>check</code> / <code>set-key</code> /
+ <code>price-update</code>. Fetches model ids from each provider's discovery endpoint and
+ resolves context window, output limit, price and reasoning-effort support from
+ <code>drawtle/model_registry.json</code>.
+</li>
+<li><strong><code>drawtle/model_registry.json</code></strong> — the limits, sourced by hand with per-entry
+ <code>source</code> and <code>checked</code> fields. A <code>null</code> means unknown and renders as <code>-</code>,
+ never <code>0</code>: a zero context window reads as unusable and a zero price as free.
+</li>
+<li><strong>Reasoning effort</strong> — <code>--effort low|medium|high</code>, sent only to models whose
+ entry declares support. An unsupported level is rejected, not clamped, so two
+ runs never look comparable when they are not. Anthropic's thinking is
+ deliberately not mapped, being a token budget rather than a level string.
+</li>
+<li><strong>Credential file</strong> — keys can be stored once instead of exported per shell,
+ under the user config directory, owner-only, read <em>after</em> the environment so
+ an explicit <code>export</code> always wins. Keys are printed masked, including in errors.
+</li>
+<li><strong><code>cost_known</code></strong> — a <code>total_cost_usd</code> of <code>0.0</code> now distinguishes "declared
+ free" from "price unknown". Prices resolve from the registry, which fixes
+ gemini runs that previously reported no cost at all.
+</li>
+<li><strong>Context-budget warning</strong> — prompts within 90% of the model's window are
+ flagged, at the point the request is assembled. Warned, not refused.
+</li>
+<li><strong>Run banner</strong> — every run prints its resolved context, price and provenance
+ before spending anything.
+</li>
+</ul>
 <h2 id="v2.1.0-figures-free-multimodal-backend-docs-design-system">v2.1.0 — figures, free multimodal backend, docs design system<a class="ah" href="#v2.1.0-figures-free-multimodal-backend-docs-design-system" aria-label="link">#</a></h2>
 <ul>
 <li><strong><code>docs/make_images.py</code></strong> — five documentation figures generated from the

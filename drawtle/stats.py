@@ -67,6 +67,11 @@ def aggregate(jsonl_path, meta=None):
         "mean_cost_per_turn_usd": _mean(cost),
         "mean_latency_s": _mean(lat),
         "total_cost_usd": round(sum(cost), 4),
+        # Distinguishes "0.0 because the model is free" from "0.0 because we
+        # have no price for it". Without this a reader cannot tell a genuinely
+        # free run from an unpriced one, and would trust the number.
+        "cost_known": all(r.get("cost_known", True) for r in records)
+        if records else None,
     }
     if meta:
         summary["backend"] = meta.get("backend")

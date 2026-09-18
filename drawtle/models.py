@@ -16,10 +16,16 @@ Best-practice features wired in here:
 """
 import json
 import os
+import sys
 import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
+
+try:
+    from . import catalog as CAT
+except ImportError:                                     # direct script use
+    import catalog as CAT                               # type: ignore
 
 
 @dataclass
@@ -29,6 +35,9 @@ class ModelResponse:
     completion_tokens: int = 0
     cost_usd: float = 0.0
     latency_s: float = 0.0
+    #: False when no source-backed price was available for this model, so a
+    #: 0.0 in cost_usd means "unknown", not "free".
+    cost_known: bool = True
     raw: dict = field(default_factory=dict)
 
 
@@ -58,7 +67,7 @@ class ModelBackend:
     key_env = ()
 
     def __init__(self, model, api_key=None, prices=None, timeout_s=60.0,
-                 max_retries=4, **_):
+                 max_retries=4, effort=None, **_):
         self.model = model
         self.api_key = api_key
         if self.api_key is None and self.key_env:
@@ -68,18 +77,66 @@ class ModelBackend:
                     break
         self.timeout_s = timeout_s
         self.max_retries = max_retries
+        self.effort = effort
+        # Capability metadata, from the local table. Resolved BEFORE pricing,
+        # because the table is the price source too -- `DEFAULT_PRICES` below is
+        # a legacy fallback kept only for models the table does not cover.
+        self.info = CAT.model_info(model) if CAT else {"known": False}
+        self.context_window = self.info.get("context_window")
+        self.max_output = self.info.get("max_output")
+
         self.prices = dict(DEFAULT_PRICES)
         if prices:
             self.prices.update(prices)
-        # resolve price for this model (exact, else by prefix)
+        # Price precedence: an explicit argument, then the local table (which
+        # records where each number came from), then the legacy dict.
         self.price = self.prices.get(model)
         if self.price is None:
             for k, v in self.prices.items():
                 if model.startswith(k):
                     self.price = v
                     break
+        if not prices and self.info.get("price_in") is not None:
+            self.price = {"in": float(self.info["price_in"]),
+                          "out": float(self.info["price_out"])}
         if self.price is None:
             self.price = {"in": 0.0, "out": 0.0}
+        # `priced` records whether the price above is source-backed. `_cost()`
+        # reads it, because reporting a fabricated 0.0 for an unknown paid model
+        # silently under-reports spend. A model that is genuinely free is a
+        # different case from one we have no price for, and is declared as such
+        # in the registry with `price_known: true`.
+        self.price_known = bool(self.info.get("price_known", False))
+        self.priced = (self.price.get("in", 0) or self.price.get("out", 0)) > 0
+        self.effort_field, self.effort_levels = (
+            CAT.effort_supported(self.name, model) if CAT else (None, ()))
+        if effort and not self.effort_field:
+            sys.stderr.write(
+                f"note: {self.name}/{model} accepts no reasoning-effort control; "
+                f"ignoring effort={effort!r}\n")
+            self.effort = None
+        elif effort and effort not in self.effort_levels:
+            raise SystemExit(
+                f"{model} accepts reasoning effort in "
+                f"{list(self.effort_levels)}, not {effort!r}")
+
+    def check_budget(self, prompt_chars, image_count=0):
+        """Warn if the request looks too large for the model's context window.
+
+        A warning, not an error: the estimate is approximate, and refusing a
+        run on an estimate would be worse than letting the provider decide.
+        The reason to do it at all is that context is the one limit this bench
+        is guaranteed to stress -- every prior frame is re-sent every turn.
+        """
+        if not self.context_window:
+            return None
+        est = CAT.estimate_request_tokens(prompt_chars, image_count)
+        if est > self.context_window * 0.9:
+            msg = (f"request ~{est:,} tokens vs a {self.context_window:,} window "
+                   f"for {self.model}")
+            sys.stderr.write(f"warning: {msg}\n")
+            return msg
+        return None
 
     def require_key(self):
         """Raise a legible error if this backend needs a key and has none.
@@ -130,8 +187,15 @@ class ModelBackend:
         raise NotImplementedError
 
     def _cost(self, pin, pout):
-        pr = self.price
-        return (pin / 1000.0) * pr["in"] + (pout / 1000.0) * pr["out"]
+        # A price is usable if it is source-backed (`price_known`) or non-zero.
+        # A genuinely free model has price_known=true and a real 0.0; a model
+        # with no entry at all has neither, and its 0.0 must not be read as
+        # "this call was free".
+        if not (self.price_known or self.priced):
+            self.cost_known = False
+            return 0.0
+        self.cost_known = True
+        return (pin / 1000.0) * self.price["in"] + (pout / 1000.0) * self.price["out"]
 
 
 class MockBackend(ModelBackend):
@@ -206,6 +270,11 @@ class OpenAIBackend(ModelBackend):
                             "image_url": {"url": f"data:image/png;base64,{image_b64}"}})
         body = {"model": self.model, "messages": messages,
                 "temperature": temperature, "max_tokens": max_tokens}
+        # Reasoning effort, only when this model is known to accept it. Sending
+        # the field to a model that does not know it is a 400 from some
+        # providers and silently ignored by others, so it is opt-in per model.
+        if self.effort and self.effort_field:
+            body[self.effort_field] = self.effort
         # OpenAI wants image as a user message; we put text prompt in `messages`
         # and attach the image to the final user turn.
         if image_b64:
