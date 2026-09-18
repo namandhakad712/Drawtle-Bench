@@ -3,9 +3,11 @@ __pycache__/
 .env
 
 # generated run artifacts (reproducible via bench.py; not committed)
-results/*run-*.jsonl
-results/*run-*.summary.json
-results/*mock-*.html
-results/dataset-sm.json
+results/*.jsonl
+results/*.summary.json
+results/*.html
+results/dataset*.json
+results/frames/
+
 
 .workbuddy-ai
