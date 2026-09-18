@@ -140,7 +140,13 @@ def main():
                    "optimal_progress": round(o, 4), "stale_progress": round(s, 4),
                    "gap": round(o - s, 4), "margin": MARGIN,
                    "gate_fires": bool(fires)}, fh, indent=2)
-    return 0 if not fires else 1
+
+    # Exit status: this script is DIAGNOSTIC, not a gate. The finding is a
+    # negative result about the gate's power, and the run "passing" (exit 0)
+    # means the experiment reproduced, not that the design is sound. Returning
+    # non-zero on `fires` would conflate "the falsification succeeded" with "CI
+    # should go red". CI calls this with `|| true` for the same reason.
+    return 0
 
 
 if __name__ == "__main__":

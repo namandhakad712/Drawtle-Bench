@@ -13,7 +13,6 @@ dependencies = []
 
 [project.optional-dependencies]
 vision = ["cairosvg", "playwright"]
-api = ["requests"]
 
 [project.scripts]
 drawtle-bench = "bench:cli_main"

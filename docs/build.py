@@ -25,6 +25,7 @@ DOCS = os.path.join(ROOT, "docs")
 PAGES = [
     ("PAPER.md", "index.html", "Paper", "The full technical treatment"),
     ("README.md", "overview.html", "Overview", "What this is and how to run it"),
+    ("TESTING.md", "testing.html", "Testing", "How to run it, and what is verified"),
     ("METHODOLOGY.md", "methodology.html", "Methodology", "Metrics and measures"),
     ("DESIGN.md", "design.html", "Design", "Design rationale and kill test"),
     ("PLAN_v2.md", "plan.html", "Plan", "v2 delivery roadmap"),

@@ -25,13 +25,19 @@ jobs:
         run: python analysis/ci_assert.py
 
       - name: Falsify the gate (must show it cannot catch a structural defect)
-        run: python analysis/gate_falsification.py || true
+        run: python analysis/gate_falsification.py
 
       - name: Rotation-semantics check
         run: python analysis/semantics_check.py
 
       - name: Kill test
         run: python analysis/killtest.py
+
+      - name: Figure lint
+        run: python analysis/check_figures.py
+
+      - name: Vision wiring (does an image reach the wire?)
+        run: python analysis/test_vision_wiring.py
 
       - name: Build the docs site
         run: python docs/build.py

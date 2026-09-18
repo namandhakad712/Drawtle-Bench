@@ -11,3 +11,6 @@ results/frames/
 
 
 .workbuddy-ai
+# scratch end-to-end runs
+e2e/
+.scratch/
