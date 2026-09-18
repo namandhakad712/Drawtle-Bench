@@ -261,8 +261,23 @@ def render_list(block):
     stack = []           # [(indent, ordered)] for OPEN lists
     items = []           # indent of each open <li>
 
+    # Text of the item currently being accumulated, plus its continuation lines.
+    # Inline formatting is applied to the WHOLE item text at once, at the moment
+    # the item closes. A bold or italic span may open on the item's first line
+    # and close several lines later -- ordinary when a wrapped sentence is
+    # emphasised -- and formatting line by line leaves the markers literal.
+    # That output is still valid HTML, so nothing but the marker-counting lint
+    # notices; it shipped a changelog with visible `**` before this was fixed.
+    buf = []
+
+    def flush_item_text():
+        if buf:
+            out.append(inline(" ".join(buf)))
+            buf.clear()
+
     def close_item():
         if items:
+            flush_item_text()
             items.pop()
             out.append("</li>")
 
@@ -285,12 +300,12 @@ def render_list(block):
         m = re.match(r"^\s*([-*+]|\d+\.)\s+(.*)$", raw)
 
         if not m:
-            if items and out:
-                out.append(" " + inline(raw.strip()))
+            # A continuation line of the item just opened.
+            if items:
+                buf.append(raw.strip())
             continue
 
         ordered = m.group(1)[0].isdigit()
-        text = m.group(2).strip()
 
         if not stack:
             out.append("<ol>" if ordered else "<ul>")
@@ -304,8 +319,10 @@ def render_list(block):
             close_nested_to(depth)
             close_item()
 
-        out.append(f"<li>{inline(text)}")
+        # Open the <li> now (so nesting order is right) and buffer its text.
+        out.append("<li>")
         items.append(depth)
+        buf.append(m.group(2).strip())
 
     close_nested_to(-1)
     while stack:
@@ -490,7 +507,7 @@ def page(title, body, toc, pages, current, desc):
 <main>
 {body}
 <footer>
-<p><strong>Drawtle Bench v2.1.0</strong> — the instrument is validated; the
+<p><strong>Drawtle Bench v2.3.0</strong> — the instrument is validated; the
 measurement is not. No real model has been run yet. Every number in these docs
 comes from reference policies, and <code>PAPER.md</code> §8.2 says so.</p>
 <p><a href="https://github.com/namandhakad712/Drawtle-Bench">Source</a> ·

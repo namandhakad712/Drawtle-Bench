@@ -39,6 +39,9 @@ jobs:
       - name: Vision wiring (does an image reach the wire?)
         run: python analysis/test_vision_wiring.py
 
+      - name: Run lifecycle (status, resume, log integrity, transcript)
+        run: python analysis/test_lifecycle.py
+
       - name: Build the docs site
         run: python docs/build.py
 
