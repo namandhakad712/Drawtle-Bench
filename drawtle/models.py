@@ -53,10 +53,19 @@ class ModelBackend:
 
     name = "base"
 
+    #: Environment variables consulted, in order, when no key is passed.
+    #: Subclasses override. Empty means the backend needs no key (mock).
+    key_env = ()
+
     def __init__(self, model, api_key=None, prices=None, timeout_s=60.0,
                  max_retries=4, **_):
         self.model = model
         self.api_key = api_key
+        if self.api_key is None and self.key_env:
+            for var in self.key_env:
+                self.api_key = os.environ.get(var)
+                if self.api_key:
+                    break
         self.timeout_s = timeout_s
         self.max_retries = max_retries
         self.prices = dict(DEFAULT_PRICES)
@@ -72,8 +81,26 @@ class ModelBackend:
         if self.price is None:
             self.price = {"in": 0.0, "out": 0.0}
 
+    def require_key(self):
+        """Raise a legible error if this backend needs a key and has none.
+
+        Without this the request goes out with `Authorization: Bearer None`
+        and the provider answers 400/401, so the failure surfaces as an opaque
+        HTTP error from deep inside urllib -- which reads as a bug in the
+        request body rather than as a missing credential. Called at the start
+        of `complete()`, before any network work.
+        """
+        if self.key_env and not self.api_key:
+            raise SystemExit(
+                f"backend {self.name!r} needs an API key and none is set.\n"
+                f"  looked for: {', '.join(self.key_env)}\n"
+                f"  set one, e.g.:  export {self.key_env[0]}=...\n"
+                f"  or check the setup first:  python analysis/preflight.py "
+                f"--backend {self.name}")
+
     def complete(self, messages, temperature=0.0, max_tokens=256, **kw):
         """Call the model with retries. Returns ModelResponse."""
+        self.require_key()
         last_err = None
         for attempt in range(self.max_retries + 1):
             try:
@@ -165,9 +192,10 @@ class MockBackend(ModelBackend):
 class OpenAIBackend(ModelBackend):
     name = "openai"
     BASE = "https://api.openai.com/v1/chat/completions"
+    key_env = ("OPENAI_API_KEY",)
 
     def __init__(self, model="gpt-4o", api_key=None, **kw):
-        super().__init__(model, api_key=api_key or os.environ.get("OPENAI_API_KEY"), **kw)
+        super().__init__(model, api_key=api_key, **kw)
 
     def _post(self, messages, temperature=0.0, max_tokens=256, image_b64=None, **kw):
         content = []
@@ -205,9 +233,10 @@ class OpenAIBackend(ModelBackend):
 class AnthropicBackend(ModelBackend):
     name = "anthropic"
     BASE = "https://api.anthropic.com/v1/messages"
+    key_env = ("ANTHROPIC_API_KEY",)
 
     def __init__(self, model="claude-3-5-sonnet", api_key=None, **kw):
-        super().__init__(model, api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"), **kw)
+        super().__init__(model, api_key=api_key, **kw)
 
     def _post(self, messages, temperature=0.0, max_tokens=256, image_b64=None, **kw):
         # Map openai-style messages to anthropic (system separate).
@@ -252,11 +281,51 @@ class AnthropicBackend(ModelBackend):
                              cost_usd=self._cost(pin, pout), latency_s=lat, raw=payload)
 
 
-_BACKENDS = {"mock": MockBackend, "openai": OpenAIBackend, "anthropic": AnthropicBackend}
+class GeminiBackend(OpenAIBackend):
+    """Google Gemini, via its OpenAI-compatible endpoint.
+
+    Gemini exposes an OpenAI-shaped chat-completions API, including image input
+    as `image_url` with a `data:image/png;base64,...` URI, so the transport is
+    identical to OpenAIBackend and we only change the host and the auth header.
+
+    Chosen as the default free provider for this bench because it has a genuine
+    free tier with image input, which makes the whole measurement reproducible
+    without a credit card. Rate limits are per project (not per key) and are not
+    published as fixed numbers -- they are shown per account in AI Studio. Treat
+    them as unknown rather than assuming a figure: run `--preflight` and let the
+    API tell you.
+    """
+
+    name = "gemini"
+    BASE = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    key_env = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+
+    def __init__(self, model="gemini-2.5-flash", api_key=None, **kw):
+        super().__init__(model, api_key=api_key or os.environ.get("GEMINI_API_KEY")
+                         or os.environ.get("GOOGLE_API_KEY"), **kw)
+
+    # No _post override: the OpenAI-compatible layer accepts the same body and
+    # the same `Authorization: Bearer` header. Gemini-specific knobs (thinking
+    # config, safety settings) live under `extra_body.google` and are not needed
+    # by this bench.
+
+
+_BACKENDS = {"mock": MockBackend, "openai": OpenAIBackend,
+             "anthropic": AnthropicBackend, "gemini": GeminiBackend}
 
 
 def make_backend(kind, model, **kw):
-    """Factory. kind in {mock, openai, anthropic}."""
+    """Factory. kind in _BACKENDS."""
     if kind not in _BACKENDS:
         raise ValueError(f"unknown backend {kind!r}; have {sorted(_BACKENDS)}")
     return _BACKENDS[kind](model, **kw)
+
+
+def backend_key_env(kind):
+    """Environment variables a backend reads its key from (empty if none).
+
+    Used by the CLI and by `analysis/preflight.py` so that the list of accepted
+    variable names lives in exactly one place.
+    """
+    cls = _BACKENDS.get(kind)
+    return tuple(getattr(cls, "key_env", ())) if cls else ()

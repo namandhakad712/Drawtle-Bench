@@ -20,6 +20,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS = os.path.join(ROOT, "docs")
+HERE = os.path.dirname(os.path.abspath(__file__))   # for resolving image paths
 
 # (source markdown, output html, nav label, short description)
 PAGES = [
@@ -133,6 +134,40 @@ def convert(md):
             cls = f' class="lang-{html.escape(lang)}"' if lang else ""
             code = html.escape("\n".join(buf), quote=False)
             out.append(f"<pre><code{cls}>{code}</code></pre>")
+            continue
+
+        # ---- figure: ![alt](src) with an optional caption ----
+        # Deliberately narrow: an image must be alone on its line. Inline
+        # images inside prose are not supported and are not used, and
+        # guessing here would silently swallow surrounding text.
+        mfig = re.match(r"^\s*!\[([^\]]*)\]\(([^)\s]+)\)\s*$", line)
+        if mfig:
+            alt, src = mfig.group(1), mfig.group(2)
+            # The sources are repo-root relative ("docs/assets/img/x.png") so
+            # that GitHub renders them from the repo root, but the built pages
+            # live *inside* docs/. Strip the docs/ prefix or every image 404s
+            # from the site while still working on github.com -- a split that
+            # no amount of looking at either surface alone would reveal.
+            web = src[5:] if src.startswith("docs/") else src
+            body = [f'<img src="{html.escape(web)}" '
+                    f'alt="{html.escape(alt, quote=True)}" loading="lazy">']
+
+            # A caption is an explicitly italic-wrapped single line, either
+            # `*text*` or `_text_`. It is NOT inferred from a following
+            # paragraph: an earlier version guessed, and silently swallowed the
+            # first line of the body text after every figure -- which cost the
+            # README its opening sentence while still producing valid HTML.
+            # Captions are marked, or there is no caption.
+            j = i + 1
+            while j < n and not lines[j].strip():
+                j += 1
+            if j < n:
+                e = re.match(r"^\s*[*_](?!\*)(.+?)(?<!\*)[*_]\s*$", lines[j])
+                if e:
+                    body.append(f"<figcaption>{inline(e.group(1))}</figcaption>")
+                    i = j
+            out.append("<figure>" + "".join(body) + "</figure>")
+            i += 1
             continue
 
         # ---- table ----
@@ -282,71 +317,145 @@ def render_list(block):
 # ----------------------------------------------------------------- page ----
 
 CSS = """
-:root{--bg:#fbfbf9;--fg:#14161a;--mut:#5b6270;--line:#e2e2dc;--pan:#ffffff;
---acc:#8a4b1f;--acc2:#1f5f8a;--code:#f4f4f0;--warn:#a86a00;--ok:#2f7d4f}
-@media (prefers-color-scheme:dark){:root{--bg:#12140f;--fg:#e8e6df;--mut:#9aa0ab;
---line:#2a2e26;--pan:#171a14;--acc:#e0a878;--acc2:#7fc4ef;--code:#1b1f18;
---warn:#e0b063;--ok:#6fce93}}
+:root{
+--bg:#fcfcfa;--bg2:#f6f6f2;--fg:#15171b;--mut:#5c6370;--faint:#8b919c;
+--line:#e4e4dd;--line2:#d3d3ca;--pan:#ffffff;--code:#f5f5f0;
+--acc:#8a4b1f;--acc2:#1c5c8a;--ok:#2c6e49;--warn:#96660a;--bad:#a32d2d;
+--sh:0 1px 2px rgba(20,20,16,.04),0 4px 14px rgba(20,20,16,.045);
+--r:10px;--r2:14px;
+--mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+--sans:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+--serif:ui-serif,Georgia,'Times New Roman',serif}
+@media (prefers-color-scheme:dark){:root{
+--bg:#111310;--bg2:#171a15;--fg:#e9e7e0;--mut:#a0a6b0;--faint:#767c86;
+--line:#282c24;--line2:#353a30;--pan:#171a15;--code:#1c2018;
+--acc:#e0a878;--acc2:#84c8f0;--ok:#74d29a;--warn:#e3b467;--bad:#f08a8a;
+--sh:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25)}}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--fg);
-font:16px/1.65 ui-serif,Georgia,'Times New Roman',serif;-webkit-font-smoothing:antialiased}
-.wrap{display:grid;grid-template-columns:250px minmax(0,1fr);gap:0;max-width:1280px;margin:0 auto}
-nav{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
-padding:26px 20px;border-right:1px solid var(--line);font-family:ui-sans-serif,system-ui,sans-serif}
-nav .brand{font-weight:700;font-size:15px;letter-spacing:-.01em;margin-bottom:3px}
-nav .brand a{color:var(--fg);text-decoration:none}
-nav .sub{color:var(--mut);font-size:11.5px;margin-bottom:20px;line-height:1.45}
-nav .grp{color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.09em;
-margin:18px 0 7px;font-weight:600}
-nav a{display:block;color:var(--mut);text-decoration:none;font-size:13px;
-padding:4px 8px;border-radius:4px;margin-left:-8px}
-nav a:hover{color:var(--fg);background:var(--pan)}
-nav a.on{color:var(--acc);font-weight:600;background:var(--pan)}
-nav .toc a{font-size:12.2px;padding:2.5px 8px;border-left:2px solid transparent;
-border-radius:0 4px 4px 0}
-nav .toc a:hover{border-left-color:var(--acc)}
-main{padding:44px 48px 120px;min-width:0}
-h1,h2,h3,h4{font-family:ui-sans-serif,system-ui,sans-serif;line-height:1.25;
-letter-spacing:-.018em;font-weight:680}
-h1{font-size:2.05em;margin:0 0 .5em}
-h2{font-size:1.42em;margin:2.1em 0 .55em;padding-bottom:.28em;border-bottom:1px solid var(--line)}
-h3{font-size:1.13em;margin:1.7em 0 .45em;color:var(--acc2)}
-h4{font-size:1em;margin:1.3em 0 .35em;color:var(--mut)}
-.ah{opacity:0;margin-left:.4em;color:var(--mut);text-decoration:none;font-size:.72em;font-weight:400}
-h1:hover .ah,h2:hover .ah,h3:hover .ah,h4:hover .ah{opacity:.55}
-a{color:var(--acc2)}
-p{margin:.72em 0}
-code{background:var(--code);padding:.13em .38em;border-radius:3px;
-font:0.86em/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-pre{background:var(--code);border:1px solid var(--line);border-radius:7px;
-padding:15px 17px;overflow-x:auto;margin:1.05em 0}
-pre code{background:none;padding:0;font-size:.845em;line-height:1.6}
-.tw{overflow-x:auto;margin:1.15em 0}
-table{border-collapse:collapse;width:100%;font-family:ui-sans-serif,system-ui,sans-serif;
-font-size:13.4px}
-th,td{border:1px solid var(--line);padding:7px 11px;text-align:left;vertical-align:top}
-th{background:var(--code);font-weight:640;white-space:nowrap}
-tbody tr:nth-child(even){background:color-mix(in srgb,var(--code) 45%,transparent)}
-blockquote{margin:1.15em 0;padding:.7em 1.1em;border-left:3px solid var(--acc);
-background:var(--pan);border-radius:0 6px 6px 0}
-blockquote p{margin:.3em 0}
-ul,ol{padding-left:1.5em;margin:.7em 0}
-li{margin:.24em 0}
-hr{border:0;border-top:1px solid var(--line);margin:2.4em 0}
-footer{color:var(--mut);font-size:12.5px;border-top:1px solid var(--line);
-margin-top:4em;padding-top:1.3em;font-family:ui-sans-serif,system-ui,sans-serif}
-@media(max-width:860px){.wrap{grid-template-columns:1fr}
-nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
-nav .toc{display:none}main{padding:28px 20px 80px}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16.5px/1.7 var(--serif);
+-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+.masthead{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);
+backdrop-filter:saturate(180%) blur(12px);border-bottom:1px solid var(--line)}
+.masthead .in{max-width:1340px;margin:0 auto;padding:11px 28px;display:flex;
+align-items:center;gap:14px;font-family:var(--sans)}
+.masthead .mk{font-weight:640;font-size:14.5px;letter-spacing:-.015em}
+.masthead .mk a{color:var(--fg);text-decoration:none}
+.masthead .tag{color:var(--faint);font-size:11.5px;padding-left:13px;
+border-left:1px solid var(--line2)}
+.masthead .sp{margin-left:auto}
+.masthead .gh{color:var(--mut);text-decoration:none;font-size:12.5px;
+padding:5px 11px;border:1px solid var(--line2);border-radius:7px}
+.masthead .gh:hover{color:var(--fg);border-color:var(--faint)}
+
+.wrap{display:grid;grid-template-columns:264px minmax(0,1fr);max-width:1340px;
+margin:0 auto;align-items:start}
+nav{position:sticky;top:52px;max-height:calc(100vh - 52px);overflow-y:auto;
+padding:30px 18px 60px 28px;border-right:1px solid var(--line);
+font-family:var(--sans)}
+nav .grp{color:var(--faint);font-size:10px;text-transform:uppercase;
+letter-spacing:.1em;margin:22px 0 8px;font-weight:640}
+nav .grp:first-child{margin-top:0}
+nav a{display:block;color:var(--mut);text-decoration:none;font-size:13.2px;
+padding:5px 10px;border-radius:7px;margin-left:-10px;line-height:1.4}
+nav a:hover{color:var(--fg);background:var(--bg2)}
+nav a.on{color:var(--acc);font-weight:600;background:var(--bg2)}
+nav .toc a{font-size:12.4px;padding:3.5px 10px;color:var(--mut)}
+nav .toc a.sub{padding-left:22px;font-size:12px;color:var(--faint)}
+
+main{padding:46px 56px 140px;min-width:0;max-width:820px}
+.lede{font-size:1.06em;color:var(--mut);line-height:1.62;margin:0 0 1.9em}
+h1,h2,h3,h4{font-family:var(--sans);line-height:1.24;letter-spacing:-.021em;
+font-weight:640;scroll-margin-top:70px}
+h1{font-size:2.1em;margin:0 0 .42em;letter-spacing:-.028em}
+h2{font-size:1.44em;margin:2.3em 0 .6em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+h3{font-size:1.14em;margin:1.85em 0 .48em}
+h4{font-size:.98em;margin:1.4em 0 .38em;color:var(--mut);
+text-transform:uppercase;letter-spacing:.05em;font-size:.82em}
+.ah{opacity:0;margin-left:.42em;color:var(--faint);text-decoration:none;
+font-size:.68em;font-weight:400;transition:opacity .12s}
+h1:hover .ah,h2:hover .ah,h3:hover .ah,h4:hover .ah{opacity:.6}
+a{color:var(--acc2);text-decoration-thickness:1px;text-underline-offset:2px}
+p{margin:.8em 0}
+strong{font-weight:640}
+code{background:var(--code);padding:.14em .4em;border-radius:4px;
+font:0.855em/1.45 var(--mono);border:1px solid var(--line)}
+pre{background:var(--code);border:1px solid var(--line);border-radius:var(--r);
+padding:16px 18px;overflow-x:auto;margin:1.2em 0;line-height:1.62}
+pre code{background:none;padding:0;border:0;font-size:.845em}
+
+.tw{overflow-x:auto;margin:1.3em 0;border:1px solid var(--line);
+border-radius:var(--r);background:var(--pan)}
+table{border-collapse:collapse;width:100%;font-family:var(--sans);font-size:13.3px}
+th,td{padding:9px 13px;text-align:left;vertical-align:top;
+border-bottom:1px solid var(--line)}
+th{background:var(--bg2);font-weight:640;white-space:nowrap;font-size:12.4px;
+letter-spacing:.01em;color:var(--fg)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:color-mix(in srgb,var(--bg2) 55%,transparent)}
+td code{font-size:12.4px}
+
+figure{margin:1.9em 0}
+/* Figures are 3:2-ish, generated at 1200px. Let them break out of the
+   820px text measure and centre, capped by the viewport, so the maze stays
+   legible. Text keeps its comfortable measure; the images get the room. */
+figure img{width:100%;height:auto;display:block;border:1px solid var(--line);
+border-radius:var(--r2);background:var(--pan)}
+/* The figures are committed as opaque PNGs with a white ground, so in dark
+   mode a full-brightness image glares out of the page. Dimming and slightly
+   desaturating it is the standard treatment and keeps one set of assets for
+   both themes -- the alternative is two rendered sets, which doubles the
+   surface that can drift. */
+@media (prefers-color-scheme:dark){
+figure img{filter:brightness(.86) contrast(1.02) saturate(.92)}
+}
+@media(min-width:1180px){
+figure{margin-left:-92px;margin-right:-92px}
+figure figcaption{padding-left:94px;padding-right:94px}
+}
+figure figcaption{color:var(--mut);font-size:13px;font-family:var(--sans);
+margin-top:.7em;line-height:1.55;padding-left:2px}
+
+blockquote{margin:1.35em 0;padding:.85em 1.2em;border-left:3px solid var(--acc);
+background:var(--bg2);border-radius:0 var(--r) var(--r) 0}
+blockquote p{margin:.35em 0}
+blockquote p:first-child{margin-top:0}
+blockquote p:last-child{margin-bottom:0}
+ul,ol{padding-left:1.55em;margin:.8em 0}
+li{margin:.3em 0}
+li>ul,li>ol{margin:.3em 0}
+hr{border:0;border-top:1px solid var(--line);margin:2.8em 0}
+
+.card{background:var(--pan);border:1px solid var(--line);border-radius:var(--r2);
+padding:19px 22px;margin:1.5em 0;box-shadow:var(--sh)}
+.card .k{font-family:var(--sans);font-size:11px;text-transform:uppercase;
+letter-spacing:.09em;color:var(--faint);font-weight:640;margin-bottom:7px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:13px;
+margin:1.7em 0}
+.stat{background:var(--pan);border:1px solid var(--line);border-radius:var(--r);
+padding:15px 17px}
+.stat .v{font-family:var(--sans);font-size:1.62em;font-weight:640;
+letter-spacing:-.024em;line-height:1.15}
+.stat .l{font-family:var(--sans);font-size:11.5px;color:var(--mut);margin-top:4px;
+line-height:1.42}
+.stat.ok .v{color:var(--ok)}.stat.bad .v{color:var(--bad)}
+.stat.acc .v{color:var(--acc)}
+
+footer{color:var(--faint);font-size:12.6px;border-top:1px solid var(--line);
+margin-top:5em;padding-top:1.5em;font-family:var(--sans);line-height:1.6}
+footer a{color:var(--mut)}
+
+@media(max-width:940px){.wrap{grid-template-columns:1fr}
+nav{position:static;max-height:none;border-right:0;border-bottom:1px solid var(--line);
+padding:18px 24px}nav .toc{display:none}main{padding:30px 22px 90px;max-width:none}
+.masthead .tag{display:none}}
 """
 
 
+
 def page(title, body, toc, pages, current, desc):
-    nav = ['<nav>',
-           '<div class="brand"><a href="index.html">Drawtle Bench</a></div>',
-           '<div class="sub">Memory dominance in<br>vision-language agents</div>',
-           '<div class="grp">Documentation</div>']
+    nav = ['<nav>', '<div class="grp">Documentation</div>']
     for _src, out, label, _d in pages:
         cls = ' class="on"' if out == current else ""
         nav.append(f'<a href="{out}"{cls}>{label}</a>')
@@ -370,13 +479,24 @@ def page(title, body, toc, pages, current, desc):
 <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
+<header class="masthead"><div class="in">
+<span class="mk"><a href="index.html">Drawtle Bench</a></span>
+<span class="tag">Memory dominance in vision-language agents</span>
+<span class="sp"></span>
+<a class="gh" href="https://github.com/namandhakad712/Drawtle-Bench">GitHub</a>
+</div></header>
 <div class="wrap">
 {chr(10).join(nav)}
 <main>
 {body}
 <footer>
-Drawtle Bench v2.0.0 — instrument validated, measurement pending.
-<a href="https://github.com/namandhakad712/Drawtle-Bench">Source on GitHub</a>.
+<p><strong>Drawtle Bench v2.0.0</strong> — the instrument is validated; the
+measurement is not. No real model has been run yet. Every number in these docs
+comes from reference policies, and <code>PAPER.md</code> §8.2 says so.</p>
+<p><a href="https://github.com/namandhakad712/Drawtle-Bench">Source</a> ·
+<a href="testing.html">Testing</a> ·
+<a href="methodology.html">Methodology</a> ·
+<a href="index.html">Paper</a></p>
 </footer>
 </main>
 </div>

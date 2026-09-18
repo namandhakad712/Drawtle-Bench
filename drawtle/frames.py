@@ -97,7 +97,23 @@ def rasterize(svg, out_path):
                     b = p.chromium.launch(**kw)
                     pg = b.new_page()
                     pg.set_content(svg)
-                    pg.locator("svg").screenshot(path=out_path)
+                    # Screenshot the document's ROOT element, and size the
+                    # viewport to the svg's own dimensions. `locator("svg")`
+                    # matches every nested <svg>, so any figure that embeds
+                    # sub-panels trips Playwright's strict-mode check; and the
+                    # default 1280x720 viewport clips anything larger, which
+                    # silently truncates big figures.
+                    import re as _re
+                    m = _re.search(r'viewBox="[\d.\-]+\s+[\d.\-]+\s+([\d.]+)\s+([\d.]+)"', svg)
+                    if m:
+                        w, h = int(float(m.group(1))), int(float(m.group(2)))
+                        pg.set_viewport_size({"width": w, "height": h})
+                    # The document body has a default 8px margin, which crops
+                    # or pads the output. Neutralise it so the PNG is exactly
+                    # the viewBox.
+                    pg.add_style_tag(content="html,body{margin:0;padding:0;"
+                                              "overflow:hidden;background:#fff}")
+                    pg.locator("html").screenshot(path=out_path)
                     b.close()
                 return out_path
             except Exception as e:              # noqa: BLE001

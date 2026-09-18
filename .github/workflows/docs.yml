@@ -30,6 +30,18 @@ jobs:
 
       # The docs build is intentionally dependency-free, so there is nothing to
       # install. If this step ever needs a pip install, that is a regression.
+      #
+      # The figures cannot be regenerated here without a browser, but their SVG
+      # source can be: it is pure Python. Regenerating it proves the committed
+      # figures still match the engine, which is the only way the images can
+      # drift. The PNGs are committed alongside and are checked for presence.
+      - name: Regenerate figure sources
+        run: python docs/make_images.py --no-raster
+
+      - name: Assert the committed figures still match the engine
+        run: git diff --exit-code -- docs/assets/img || {
+               echo '::error::docs/assets/img is out of date — run python docs/make_images.py and commit the result'; exit 1; }
+
       - name: Build the site
         run: python docs/build.py
 
