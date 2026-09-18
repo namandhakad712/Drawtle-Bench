@@ -23,3 +23,18 @@ jobs:
               --dataset results/dataset.ci.json --out-dir results --run-id ci-stale --limit 20
       - name: Assert Optimal > Stale (floor check)
         run: python analysis/ci_assert.py
+
+      - name: Falsify the gate (must show it cannot catch a structural defect)
+        run: python analysis/gate_falsification.py || true
+
+      - name: Rotation-semantics check
+        run: python analysis/semantics_check.py
+
+      - name: Kill test
+        run: python analysis/killtest.py
+
+      - name: Build the docs site
+        run: python docs/build.py
+
+      - name: Lint the built site
+        run: python docs/lint.py
