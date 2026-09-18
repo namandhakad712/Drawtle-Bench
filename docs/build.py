@@ -25,6 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))   # for resolving image paths
 # (source markdown, output html, nav label, short description)
 PAGES = [
     ("PAPER.md", "index.html", "Paper", "The full technical treatment"),
+    ("GETTING_STARTED.md", "getting-started.html", "Getting started", "Step-by-step for a new user"),
     ("README.md", "overview.html", "Overview", "What this is and how to run it"),
     ("TESTING.md", "testing.html", "Testing", "How to run it, and what is verified"),
     ("METHODOLOGY.md", "methodology.html", "Methodology", "Metrics and measures"),
@@ -507,10 +508,11 @@ def page(title, body, toc, pages, current, desc):
 <main>
 {body}
 <footer>
-<p><strong>Drawtle Bench v2.3.0</strong> — the instrument is validated; the
+<p><strong>Drawtle Bench v2.4.0</strong> — the instrument is validated; the
 measurement is not. No real model has been run yet. Every number in these docs
 comes from reference policies, and <code>PAPER.md</code> §8.2 says so.</p>
 <p><a href="https://github.com/namandhakad712/Drawtle-Bench">Source</a> ·
+<a href="getting-started.html">Getting started</a> ·
 <a href="testing.html">Testing</a> ·
 <a href="methodology.html">Methodology</a> ·
 <a href="index.html">Paper</a></p>

@@ -1,5 +1,45 @@
 # Changelog
 
+## v2.4.0 — onboarding guide, Docker envelope fixed, dashboard empty-state
+- **`GETTING_STARTED.md`** — a complete walkthrough for a first-time user, from
+  an empty checkout to a finished run, plus a real-model path. Every command in
+  it was executed and its output verified before the document was committed.
+  Published as a docs page (`getting-started.html`) and linked from the footer
+  nav on every page.
+- **`docker/docker-compose.yml` — three defects fixed.** It shipped with
+  `network_mode: "none"`, which removes the network interface entirely, so a run
+  against a real backend could not reach the provider and died on the first
+  turn — while the comment above it described allow-listing egress, i.e. a
+  reachable network. Replaced with an `internal: true` network (no route
+  outward, correct for the mock backend) plus a header comment spelling out both
+  the quick and the correct way to reach a provider.
+- **`GEMINI_API_KEY` / `GOOGLE_API_KEY` were not passed into the container.**
+  Gemini is the recommended free vision backend, so the container could not see
+  the key even when the host had it exported. Both are now forwarded, alongside
+  a `DRAWTLE_IN_SANDBOX=1` marker so `sandbox.describe()` can report `level:
+  docker` from inside rather than inferring it from a file on disk.
+- **`docker/Dockerfile` — `web/` was missing.** `bench.py` does `from web import
+  server as SRV`, so the image built fine and then failed at import time on the
+  `serve` path. `web/` is now copied, the `pip install` runs as an unprivileged
+  user into a writable prefix so the rasteriser survives the later `USER` switch,
+  and a build-time import check turns a missing module into a build failure
+  instead of a run-time one.
+- **`analysis/check_docker.py`** — a new static check that every repo-local
+  module `bench.py` imports is present in the image. Passes; verified to fail
+  when `COPY web/` is removed. Wired into CI, because the unit tests all run from
+  the source tree and therefore cannot see this class of defect.
+- **`python -m drawtle.sandbox`** — prints the probe result as a readable block,
+  so "am I actually isolated?" is one command instead of a run or a dashboard.
+  Previously the module had no `__main__` guard and silently printed nothing.
+- **Dashboard: empty episode list** no longer renders as a bare `n/a`. A run
+  stopped before its first episode showed a table of literal `n/a` with no
+  explanation; it now says the run was stopped before episode 0 was written, and
+  the heading carries the episode count.
+- **`docker/sandbox.md`** now leads layer 2 with an explicit status warning: the
+  container path has never been executed on the development machine, so every
+  committed run reports `sandbox: none`. The isolation contract is a
+  specification, and the document says so rather than implying otherwise.
+
 ## v2.3.0 — run lifecycle: status, resume, log integrity, honest isolation
 - **`drawtle/runstate.py`** — every run now has a status (`started` / `success` /
   `error` / `interrupted` / `unknown`), written before any work and updated at

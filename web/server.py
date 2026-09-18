@@ -113,7 +113,12 @@ def _card(r):
 
 
 def run_html(dir_, run_id):
-    """Return (html, status). A missing run is a 404, not a 200 with sad text."""
+    """Return (html, status). A missing run is a 404, not a 200 with sad text.
+
+    The page owns its own title/placeholder because it is served both as a
+    fragment and inside a full document -- without this the episode list could
+    render as the literal text "n/a" with no explanation when it is empty.
+    """
     summary_path = os.path.join(dir_, f"{run_id}.summary.json")
     if not os.path.exists(summary_path):
         return (f"<h1>Run {_esc(run_id)} not found</h1>"
@@ -127,6 +132,10 @@ def run_html(dir_, run_id):
         f"<td>{_fmt(e.get('efficiency'))}</td><td>{e.get('steps')}</td>"
         f"<td><a href='/run/{_esc(run_id)}/episode/{e.get('episode')}'>replay</a></td></tr>"
         for e in eps)
+    if not rows:
+        rows = (f'<tr><td colspan="8" style="color:{MUTED}">No episodes recorded. '
+                f'The run was stopped before the first episode was written.</td></tr>')
+    n_eps = s.get("n_episodes", len(eps))
     # NOTE: the summary stores `completion_rate`, not `completion` -- reading the
     # wrong key here silently rendered "n/a" on every run page.
     status = s.get("status", "unknown")
@@ -145,7 +154,7 @@ def run_html(dir_, run_id):
 "completion {_pct(s.get('completion_rate'))} &middot; MDI {_fmt(s.get('mdi'))} &middot; "
 "cost ${s.get('total_cost_usd', 0):.3f} &middot; "
 "{s.get('n_turns', 0)} turns in {s.get('wallclock_s', 0)}s</div>
-<h2 style="font-size:16px">Episodes</h2>
+<h2 style="font-size:16px">Episodes ({n_eps})</h2>
 <table style="width:100%;border-collapse:collapse;font-size:13px">
 <tr style="text-align:left;color:{MUTED}"><th>#</th><th>Size</th><th>Pair</th><th>Progress</th>
 <th>Completion</th><th>Efficiency</th><th>Steps</th><th></th></tr>{rows}</table>
