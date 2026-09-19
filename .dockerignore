@@ -1,0 +1,78 @@
+# Build context exclusions.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# The Dockerfile does `COPY configs/ ./configs/`. Docker has no notion of
+# `.gitignore`, so without this file that COPY brings `configs/.env` into the
+# image -- and a secret copied into a layer is in the image permanently. It
+# survives in the layer even if a later step deletes the file, is visible to
+# anyone who can pull the image, and is exactly the kind of leak that is
+# discovered by a stranger rather than by the person who made it.
+#
+# The project's `.env` holds live API keys. It is gitignored, and it must be
+# dockerignored for the same reason.
+#
+# Rule for this file: anything that is either (a) a secret, (b) a generated
+# artifact, or (c) large and irrelevant to the build, is excluded. When in
+# doubt, exclude -- the cost is a rebuild, and the cost of the alternative is a
+# leaked key.
+
+# ---- secrets: never in an image -------------------------------------------
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+credentials.json
+**/credentials.json
+overlay.json
+**/overlay.json
+.secrets/
+**/.secrets/
+
+# ---- version control and editor state --------------------------------------
+.git
+.git/**
+.github
+.gitignore
+.gitattributes
+*.swp
+*~
+.vscode/
+.idea/
+.DS_Store
+
+# ---- generated run artifacts ------------------------------------------------
+# Results are reproducible from the CLI and are not inputs to a build. They are
+# also large, and some of them embed model output.
+results/
+e2e/
+.scratch/
+*.pyc
+__pycache__/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- agent / local working state --------------------------------------------
+.workbuddy-ai/
+.claude/
+CLAUDE.md
+
+# ---- documentation and figures -------------------------------------------------
+# Not needed to run, and the figures are generated.
+docs/
+figures/
+*.md
+!README.md
+
+# ---- local virtualenvs --------------------------------------------------------
+venv/
+.venv/
+env/
+node_modules/

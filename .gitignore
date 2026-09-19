@@ -2,13 +2,37 @@ __pycache__/
 *.pyc
 .env
 
-# generated run artifacts (reproducible via bench.py; not committed)
+# ---- generated run artifacts ------------------------------------------------
+# A run writes a family of files, not one. Listing only some of them meant the
+# rest (status, checkpoint, transcript) showed up as untracked after every run
+# and were one `git add -A` away from being committed. Anything a run produces
+# belongs here, so the rule is stated as a family rather than file by file.
+#
+# All of it is reproducible from `bench.py`; none of it is an input.
 results/*.jsonl
+results/*.jsonl.transcript.json
 results/*.summary.json
+results/*.status.json
+results/*.done.json
 results/*.html
 results/dataset*.json
 results/frames/
 
+# Committed on purpose, so the list above does not hide them: the reference
+# fixtures the tests assert against. `!` must come after the exclusion.
+# mock-opt is the legacy-log fixture: it predates the token split and the
+# accounting tests read it to prove a pre-split log is still read correctly.
+!results/bench_properties.json
+!results/bench_demo.json
+!results/bench_demo.txt
+!results/killtest.txt
+!results/gate_falsification.json
+!results/gate_falsification.txt
+!results/semantics_check.json
+!results/mock-opt.jsonl
+!results/mock-opt.summary.json
+!results/mock-stale.jsonl
+!results/mock-stale.summary.json
 
 .workbuddy-ai
 # scratch end-to-end runs

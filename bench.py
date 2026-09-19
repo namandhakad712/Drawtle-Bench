@@ -297,14 +297,33 @@ def cmd_runs(a):
         print(f"{rid:34} {status:12} {nturns:>6} {neps:>4} {nck:>5} "
               f"{rep['bytes']:>9}  {health}")
     bad = [r for r in rows if r[1] != RS.STATUS_SUCCESS]
-    if bad:
-        print(f"\n{len(bad)} run(s) did not finish cleanly. Resume one with:")
-        for rid, status, *_ in bad:
-            if status in (RS.STATUS_ERROR, RS.STATUS_INTERRUPTED, RS.STATUS_STARTED):
-                print(f"  python bench.py run ... --resume --run-id {rid}")
-                break
-    else:
+    if not bad:
         print(f"\nall {len(rows)} run(s) finished cleanly")
+        return
+    # Three different situations were previously reported under one sentence,
+    # which made a committed reference-policy run look like a failure. They need
+    # different actions from the reader, so they are counted separately:
+    #   interrupted / error / started -> something to resume or investigate
+    #   unknown                       -> predates status tracking; may be fine,
+    #                                    but nothing can prove it
+    actionable = [r for r in bad
+                  if r[1] in (RS.STATUS_ERROR, RS.STATUS_INTERRUPTED,
+                              RS.STATUS_STARTED)]
+    unproven = [r for r in bad if r[1] == RS.STATUS_UNKNOWN]
+    if actionable:
+        print(f"\n{len(actionable)} run(s) stopped or failed before finishing. "
+              f"Resume one with:")
+        for rid, status, *_ in actionable:
+            print(f"  python bench.py run ... --resume --run-id {rid}   "
+                  f"({status})")
+    if unproven:
+        print(f"\n{len(unproven)} run(s) have no status record, so they are "
+              f"neither results nor known failures.")
+        print("  They predate status tracking (or were started outside this "
+              "tool). Nothing can prove they completed, which is why they are "
+              "not ranked -- a missing record is not evidence of success.")
+        print("  Re-run them to get a status record, or inspect one with:")
+        print(f"  python bench.py status --run {unproven[0][0]}")
 
 
 def cmd_status(a):

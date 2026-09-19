@@ -117,8 +117,11 @@ would contain no question at all — proven over the corpus, not asserted; see
 | `drawtle/runstate.py` | run lifecycle: status, atomic writes, per-episode checkpointing, log-integrity scanning. Nothing writes a bare `open(..., "w")`. |
 | `drawtle/transcript.py` | de-duplicates the messages a run sent, so a log that re-sends every prior frame does not grow as O(N²). |
 | `drawtle/sandbox.py` | probes and reports the isolation actually in force, and records it into each run's provenance. |
-| `drawtle/stats.py` | aggregates trajectories; **bootstrap 95% CI** on progress; input/output tokens kept separate and labelled `measured` or `estimated`; leaderboard reader that refuses to rank an unclean run. |
-| `drawtle/report.py` | self-contained offline HTML dashboard (KPI cards, per-episode chart, leaderboard). |
+| `drawtle/stats.py` | aggregates trajectories; **bootstrap 95% CI** on progress; input/output tokens kept separate and labelled `measured` or `estimated`; enumerates runs by any of their own files, so a stopped run is reported rather than silently omitted. |
+| `drawtle/discovery.py` | live provider discovery with **no cache**, per-field provenance for every discovered number, and the user-side overlay that the control centre writes to. |
+| `drawtle/frames.py` | SVG→PNG frame cache, plus `rasteriser_status()` which reports whether this interpreter can actually render a frame. |
+| `drawtle/report.py` | self-contained offline HTML report (KPI cards, per-episode chart, leaderboard). |
+| `web/` | **the control centre** — configure, discover, launch, watch, stop. `server.py` (routes + run supervisor), `views.py` (the page), `theme.py`, `guard.py` (validation), `supervisor.py` (child processes). |
 | `bench.py` | CLI: `generate` / `run` / `report` / `leaderboard` / `runs` / `status` / `cost` / `serve`. |
 | `configs/default.json`, `docker/` | run config + Dockerfile + compose + isolation contract (`docker/sandbox.md`). |
 | `GETTING_STARTED.md` | end-to-end walkthrough for a first-time user: install, generate, run, read the logs, resume, dashboard, real model. |
@@ -144,27 +147,83 @@ python bench.py run --backend openai --model gpt-4o \
 python bench.py run --backend gemini --model gemini-2.5-flash \
     --dataset results/dataset.json --out-dir results --frames results/frames
 
-# 4. dashboards + ranking
+# 4. the control centre — configure, discover, run, watch, all in one page
+python bench.py serve                 # http://127.0.0.1:8080
+
+# 4b. or the offline report and the ranking, from the CLI
 python bench.py report --run results/run-gpt-4o-<ts>.summary.json --out results/gpt4o.html
 python bench.py leaderboard --dir results
 ```
 
+### The control centre
+
+`python bench.py serve` opens one page with seven views:
+
+| View | What it does |
+|---|---|
+| **Overview** | run counts, the leaderboard, and how many runs were excluded |
+| **Providers** | every provider with its key status; **Probe** asks it live and reports what it actually returned |
+| **Models** | the model table with a **Frame input** column — `yes` / `no` / `unchecked` |
+| **Launch** | pick a provider, model, dataset, mode; check the setup first, then start |
+| **Results** | clean runs ranked, excluded runs listed with the reason |
+| **Logs** | live process output, and log health for every run on disk |
+| **System** | isolation, the frame rasteriser, where every config file lives, and which limits are still unknown |
+
+Adding and editing providers and models happens here. **Edits are written to a
+user-side overlay, never to the repository** — so your changes cannot be lost to,
+or conflict with, a `git pull`. The shipped `providers.json` and
+`model_registry.json` are read-only defaults.
+
+Three rules the page holds to, because each is a way a benchmark dashboard lies
+to its reader:
+
+- **`null` is never rendered as `0`.** An unknown context window shows as a dash
+  with the reason attached. A blank cell reads as "zero" to anyone skimming, and
+  "this model is unusable" is a much stronger claim than "nobody checked".
+- **Every discovered number says where it came from** — `api` (the provider
+  published it, this session) or `local` (it is our table entry). There is no
+  state in which a cached figure is shown as current.
+- **An excluded run is never ranked**, and the ranking says how many were left
+  out. A run that was interrupted covers a different, usually easier, set of
+  episodes than a complete one.
+
+### Which models can actually be measured
+
+The bench sends a rendered maze frame every turn, so a model without image input
+cannot be measured by it:
+
+```bash
+python -m drawtle.catalog capabilities    # frame-capable / text-only / unchecked
+```
+
+**Unchecked is not the same as text-only.** A model with no recorded
+capabilities has simply never been checked, and the UI renders that as its own
+state rather than folding it into either answer.
+
 ### Any provider
 
 Anything that speaks the OpenAI chat-completions shape works, and adding one is
-an edit to `drawtle/providers.json` rather than a new class:
+an edit to `drawtle/providers.json` rather than a new class. **22 providers and
+90 models** ship, including the ones imported from two agent-harness configs
+(`agnes`, `nararouter`, `poolside`, `inferx`, `opencode`, `token-harbor`, …):
 
 ```bash
 python -m drawtle.catalog providers              # every supported provider + auth
-python bench.py run --backend internlm --model intern-s2 \
+python -m drawtle.catalog probe -v               # ask them all, live, no cache
+python bench.py run --backend intern --model intern-s2 \
     --dataset results/dataset.json --out-dir results --frames results/frames
-python bench.py run --backend ollama  --model llava    --dataset ... --frames ...
+python bench.py run --backend ollama --model llava --dataset ... --frames ...
 ```
 
 The registry carries the endpoint, the auth style, the key variables, the model
 discovery route, and the names of the token-count fields. A provider whose
 `usage_fields` is `null` has not been verified to return a usage block — its
 counts are then **estimated** and labelled as such, never reported as measured.
+InternLM's has been verified against the live endpoint and does carry one.
+
+`probe` asks each provider right now and reports, per model, **where every
+number came from**: the provider's own payload, or our local table. Nothing is
+cached, so what it prints was true when it printed.
 
 ### Cost: decide before you spend
 

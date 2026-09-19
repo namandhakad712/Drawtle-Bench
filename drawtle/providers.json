@@ -37,11 +37,22 @@
     "                These are exempt from the missing-key error by design.",
     "  rate_limit    published limit as a string, or null if not published.",
     "                Never a guess -- see the rule in model_registry.json.",
+    "  capabilities  capability tokens this provider's models may carry.",
+    "                INFORMATIONAL ONLY -- never read at run time. The per-MODEL",
+    "                capabilities in model_registry.json are the authority; a",
+    "                provider flag is a hint about a family, not a claim about a",
+    "                specific model. Vocabulary is shared with model_registry:",
+    "                image_in, video_in, audio_in, thinking, always_thinking,",
+    "                tool_use. `image_in` is the one this bench tests for: a",
+    "                model without it cannot read a rendered frame, so a",
+    "                frame-based mode against it measures nothing.",
     "",
-    "Never put a key in this file. It is versioned with the repo."
+    "Never put a key in this file. It is versioned with the repo.",
+    "Keys come from the environment (see configs/.env.example) or from the",
+    "user-side credential store written by `catalog set-key`."
   ],
-  "version": 1,
-  "updated": "2026-09-18",
+  "version": 2,
+  "updated": "2026-09-19",
   "providers": {
     "mock": {
       "protocol": "mock",
@@ -104,12 +115,13 @@
       "protocol": "openai",
       "url": "https://chat.intern-ai.org.cn/api/v1/chat/completions",
       "key_env": ["INTERNLM_API_KEY", "INTERN_API_KEY"],
-      "models_url": null,
-      "models_path": null,
+      "models_url": "https://chat.intern-ai.org.cn/api/v1/models",
+      "models_path": "data[].id",
       "auth": "bearer",
       "openai_compat": true,
-      "usage_fields": null,
-      "context_note": "Base https://chat.intern-ai.org.cn/api/v1/ -- note this is a DIFFERENT host from the console and docs site (internlm.intern-ai.org.cn), which is the mistake to make here. Auth is `Authorization: Bearer <token>`; the OpenAI SDK form takes the token WITHOUT the Bearer prefix. Published rate limit: 30 requests/min/user. 256K context on intern-s2, intern-s1-pro and intern-s2-preview-35b; 32K on intern-s1 and intern-s1-mini. Multimodal via content arrays. The published request/response reference does NOT document a `usage` object: until a real call confirms one, treat cost as unknown and token counts as estimated. No pricing is published. `thinking_mode` (bool) is accepted by the s2/s1 families and defaults ON, which costs output tokens -- this registry does not expose it, so a run gets the default.",
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "capabilities": ["image_in", "video_in", "thinking", "tool_use"],
+      "context_note": "Base https://chat.intern-ai.org.cn/api/v1/ -- note this is a DIFFERENT host from the console and docs site (internlm.intern-ai.org.cn), which is the mistake to make here. Auth is `Authorization: Bearer <token>`; the OpenAI SDK form takes the token WITHOUT the Bearer prefix. Published rate limit: 30 requests/min/user. 256K context on intern-s2, intern-s1-pro and intern-s2-preview-35b; 32K on intern-s1 and intern-s1-mini. Multimodal via content arrays: a real 80 KB frame was accepted by intern-s2, intern-s1 and internvl3.5-latest on 2026-09-19, and the vision models tokenise it (623 / 1870 / 1950 prompt tokens respectively for the same image, which is why prompt cost differs sharply between them for identical input). VERIFIED 2026-09-19: the endpoint DOES return a `usage` object with prompt/completion/total counts, so tokens are measured rather than estimated. The earlier note saying the reference does not document one, and advising readers to treat counts as estimated, was correct about the docs and wrong about the API. No pricing is published, so cost is still reported as unknown -- measured tokens with an unknown price, which is a different and more useful state than estimated tokens with an unknown price. `thinking_mode` (bool) is accepted by the s2/s1 families and defaults ON, which is why a reply opens with reasoning prose before the JSON; this registry does not expose the flag, so a run gets the default. Transient failures ('in prompt processing error', and a 400 on internvl3.5-latest) were observed and both cleared on retry with an identical payload -- treat them as retryable.",
       "self_hosted": false,
       "rate_limit": "30 req/min/user"
     },
@@ -208,6 +220,156 @@
       "openai_compat": true,
       "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
       "context_note": "Hosts many open-weight models including vision ones. Per-model pricing is on the discovery payload for this provider.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "intern": {
+      "protocol": "openai",
+      "url": "https://chat.intern-ai.org.cn/api/v1/chat/completions",
+      "key_env": ["INTERN_API_KEY", "INTERNLM_API_KEY"],
+      "models_url": "https://chat.intern-ai.org.cn/api/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "capabilities": ["image_in", "video_in", "thinking", "tool_use"],
+      "context_note": "Same host as `internlm`; the two entries exist because the harness this was imported from names this provider `intern` and its keys INTERN_API_KEY, while the docs use `internlm`. Both resolve to the same endpoint, so a model run under either name is the same model -- do not treat them as two providers in a comparison. VERIFIED against the live endpoint on 2026-09-19: the response DOES carry a `usage` object (`prompt_tokens`/`completion_tokens`/`total_tokens`), so token counts are measured, not estimated. An earlier note claimed no usage block was documented and told readers to assume estimates; a real call disproved that. Model list IS discoverable at /v1/models. The s2/s1 families reason before answering -- a reply opens with prose such as 'The user wants me to...' before any JSON -- which is the default-ON `thinking_mode` showing through and is why the parser must extract JSON rather than expect a bare object. Two transient failures were observed during verification ('in prompt processing error' and a 400 on internvl3.5-latest); both succeeded on retry with identical payloads, so treat either as retryable rather than as a configuration fault.",
+      "self_hosted": false,
+      "rate_limit": "30 req/min/user"
+    },
+
+    "agnes": {
+      "protocol": "openai",
+      "url": "https://apihub.agnes-ai.com/v1/chat/completions",
+      "key_env": ["AGNES_API_KEY"],
+      "models_url": "https://apihub.agnes-ai.com/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["image_in", "video_in", "audio_in", "thinking", "tool_use"],
+      "context_note": "Aggregator-style hub. Discovery returns image, video and text models side by side, so a model id alone does not say whether it accepts a rendered frame -- check `capabilities` on the model, not the provider. Publish no pricing or context windows on the models route.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "nararouter": {
+      "protocol": "openai",
+      "url": "https://router.bynara.id/v1/chat/completions",
+      "key_env": ["NARAROUTER_API_KEY"],
+      "models_url": "https://router.bynara.id/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["image_in", "thinking", "tool_use"],
+      "context_note": "Router in front of many upstream vendors, addressed by bare model id (no `vendor/` prefix). Discovery returns the largest list of any provider here, so it is the cheapest way to widen a model sweep -- but an id behind a router can be repointed upstream, which is why every run log records the model string it was actually given rather than resolving it.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "poolside": {
+      "protocol": "openai",
+      "url": "https://inference.poolside.ai/v1/chat/completions",
+      "key_env": ["POOLSIDE_API_KEY"],
+      "models_url": "https://inference.poolside.ai/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["thinking", "tool_use"],
+      "context_note": "Serves the Laguna family only. Model ids carry a `poolside/` prefix in both the discovery payload and the request body, so the prefix is part of the id and must not be stripped. NO image_in on either Laguna model -- a frame-based mode against this provider cannot work.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "inferx": {
+      "protocol": "openai",
+      "url": "https://model.inferx.net/endpoints/v1/chat/completions",
+      "key_env": ["INFERX_API_KEY"],
+      "models_url": "https://model.inferx.net/endpoints/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["image_in", "video_in", "audio_in", "thinking", "tool_use"],
+      "context_note": "Dedicated endpoints host. Almost all models are text-only; the exception is Qwen3.6-35B-A3B-FP8, which declares image_in, video_in and audio_in. That one model is the reason this provider is worth wiring in: it is a genuinely multimodal option on a host where the rest are not.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "opencode": {
+      "protocol": "openai",
+      "url": "https://opencode.ai/zen/v1/chat/completions",
+      "key_env": ["OPENCODE_API_KEY"],
+      "models_url": "https://opencode.ai/zen/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["image_in", "video_in", "audio_in", "thinking", "always_thinking", "tool_use"],
+      "context_note": "Zen gateway. Mixes free and paid ids in one list; the `-free` suffix is the free tier and is part of the id. Some ids are `always_thinking`, meaning the model reasons on every turn whether or not a thinking control is sent -- output token counts on those will be far higher than a comparable non-thinking model, which is a property of the model and not of this bench.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "opencode-custom": {
+      "protocol": "openai",
+      "url": "https://opencode.ai/zen/v1/chat/completions",
+      "key_env": ["OPENCODE_CUSTOM_API_KEY"],
+      "models_url": "https://opencode.ai/zen/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["image_in", "video_in", "audio_in", "thinking", "always_thinking", "tool_use"],
+      "context_note": "Same endpoint as `opencode`, separate key. Kept as its own entry because the two keys can carry different entitlements on the same host, and a run has to record which key it used. Discovery is therefore expected to return the same ids as `opencode` -- if it does not, the two keys are not equivalent, which is worth knowing.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "atria-dawn-internlm": {
+      "protocol": "openai",
+      "url": "https://api.atria-asi.ai/v1/chat/completions",
+      "key_env": ["ATRIA_DAWN_INTERLM_API_KEY"],
+      "models_url": "https://api.atria-asi.ai/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["thinking", "tool_use"],
+      "context_note": "Serves Atria-Dawn-Preview, a 256K-context model. The id is capitalised (`Atria-Dawn-Preview`) and must be sent exactly as written. Declared as thinking + tool_use but NOT image_in, so despite the `internlm` in the provider name it is not the multimodal InternVL line.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "token-harbor": {
+      "protocol": "openai",
+      "url": "https://tokenharbor.ai/v1/chat/completions",
+      "key_env": ["TOKEN_HARBOR_API_KEY"],
+      "models_url": "https://tokenharbor.ai/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["image_in", "video_in", "audio_in", "thinking", "tool_use"],
+      "context_note": "Gateway whose free ids carry a `:free` suffix as part of the model string. 1M-token windows are advertised on the free tier, which makes this the cheapest large-context option of the providers here -- but advertised window is not a measured one, and a run still has to be watched for context errors. No pricing published.",
+      "self_hosted": false,
+      "rate_limit": null
+    },
+
+    "institute-of-foundation-models": {
+      "protocol": "openai",
+      "url": "https://api.ifm.ai/v1/chat/completions",
+      "key_env": ["INSTITUTE_OF_FOUNDATION_MODELS_API_KEY"],
+      "models_url": "https://api.ifm.ai/v1/models",
+      "models_path": "data[].id",
+      "auth": "bearer",
+      "openai_compat": true,
+      "usage_fields": null,
+      "capabilities": ["thinking", "tool_use"],
+      "context_note": "Serves the K2 family. Model ids contain a literal `/` (`IFM/K2-Horizon-375B-A23B`), so the id has a path separator in it -- safe here because this registry never parses a model id into parts, it passes it through. No key is present for this provider; it will report as unconfigured until one is stored.",
       "self_hosted": false,
       "rate_limit": null
     }

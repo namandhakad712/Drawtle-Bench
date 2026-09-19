@@ -40,6 +40,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from . import discovery as DSC
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
@@ -66,12 +68,18 @@ _DISCOVERY_FALLBACK = {
 
 
 def _load_discovery():
-    """Discovery table derived from the provider registry."""
-    path = os.path.join(HERE, "providers.json")
+    """Discovery table derived from the provider registry.
+
+    Reads through `discovery.merged_providers()` rather than opening
+    providers.json directly, so a provider the user added through the control
+    centre is discoverable without any extra step. The registry file shipped in
+    the repo is the default; the user overlay is the authority on top of it.
+    """
     try:
-        with open(path, encoding="utf-8") as fh:
-            provs = json.load(fh).get("providers", {})
-    except (OSError, ValueError):
+        provs = DSC.merged_providers()
+    except Exception:
+        provs = {}
+    if not provs:
         return dict(_DISCOVERY_FALLBACK)
     out = {}
     for name, spec in provs.items():
@@ -172,9 +180,15 @@ def resolve_key(backend, explicit=None):
     `source` is one of "argument", "env:NAME", "file", or None. Callers show
     the source rather than the key, so a misconfiguration is visible without
     ever printing the secret.
+
+    The project's `configs/.env` is read into the environment first (without
+    overriding anything already set), because that is where the keys for this
+    deployment live and a shell that did not source it would otherwise report a
+    key as missing rather than as unloaded.
     """
     if explicit:
         return explicit, "argument"
+    DSC.load_dotenv()
     for var in DISCOVERY.get(backend, {}).get("env", ()):
         v = os.environ.get(var)
         if v:
@@ -199,12 +213,38 @@ def mask(key):
 
 
 def load_registry(path=None):
-    """The local model table. Missing file is an empty table, not an error."""
-    path = path or KNOWN_MODELS
+    """The local model table. Missing file is an empty table, not an error.
+
+    With no explicit `path`, the result is the shipped table with the user's
+    overlay merged over it, so a model added through the control centre is
+    resolvable by every caller -- the runner, preflight, cost, the UI -- without
+    each being taught about the overlay. An explicit `path` reads that file
+    alone, which is what a test wants.
+    """
+    if path is None:
+        models = DSC.merged_models()
+        base = _read_registry_file()
+        return {"version": base.get("version", 0),
+                "updated": base.get("updated"),
+                "updated_jst": base.get("updated_jst"),
+                "models": models,
+                "overlay": DSC.OVERLAY_FILE,
+                "n_overlay_models": len(DSC.load_overlay()["models"])}
     if not os.path.exists(path):
         return {"version": 0, "models": {}}
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _read_registry_file():
+    """The shipped table as written on disk, overlay not applied."""
+    if not os.path.exists(KNOWN_MODELS):
+        return {}
+    try:
+        with open(KNOWN_MODELS, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
 
 
 def model_info(model, path=None):
@@ -595,6 +635,98 @@ def _short_note(text, width=44):
 
 
 
+def _cmd_probe(a):
+    """Ask providers right now and report what each one actually published.
+
+    Distinct from `fetch`: `fetch` lists ids and tells you which are already in
+    the local table. `probe` is the control centre's backend -- it goes through
+    `discovery.probe`, which for each model reports WHERE every number came
+    from (the provider's own payload, or the local table) and returns the URL
+    that answered. Nothing is cached, so what is printed was true when printed.
+    """
+    names = [a.backend] if a.backend else sorted(DSC.merged_providers())
+    results = DSC.probe_all(names, timeout=a.timeout)
+    ok = 0
+    for res in results:
+        prov = res["provider"]
+        if not res.get("ok"):
+            print(f"  {prov:<32} --  {res.get('error')}")
+            continue
+        ok += 1
+        print(f"  {prov:<32} ok  {res['n']:>3} models  "
+              f"{res['elapsed_ms']:>5} ms  via {res.get('key_source') or 'no key'}")
+        if a.verbose:
+            for m in res["models"]:
+                ctx = m.get("context_window")
+                ctx_s = f"{ctx:,} ({m.get('context_source')})" if ctx else "-"
+                caps = ",".join(m.get("capabilities") or []) or "-"
+                print(f"      {m['id']:<44} ctx {ctx_s:<28} {caps}")
+    print()
+    print(f"  {ok}/{len(results)} provider(s) answered. Results are live; nothing")
+    print("  is cached, so if a provider is empty here it was empty just now.")
+    print("  '(api)' next to a context window means the provider published it;")
+    print("  '(local_table)' means it did not, and the figure is ours.")
+    return 0
+
+
+def _cmd_capabilities(a):
+    """Which models can see a frame, and which cannot.
+
+    This is the one capability this bench depends on. A model without
+    `image_in` cannot read a rendered maze, so a frame-based run against it
+    measures nothing -- the answer matters before a run, not after.
+    """
+    models = load_registry().get("models", {})
+    yes, no, unknown = [], [], []
+    for mid in sorted(models):
+        caps = models[mid].get("capabilities")
+        if caps is None:
+            unknown.append(mid)
+        elif "image_in" in caps:
+            yes.append(mid)
+        else:
+            no.append(mid)
+    print(f"frame input  (image_in) -- {len(models)} model(s) in the table")
+    print()
+    print(f"  CAN    read a frame            {len(yes)}")
+    for m in yes:
+        print(f"    {m}")
+    print(f"  CANNOT read a frame            {len(no)}")
+    for m in no:
+        print(f"    {m}  ({', '.join(models[m].get('capabilities') or [])})")
+    if unknown:
+        print(f"  UNKNOWN                        {len(unknown)}")
+        for m in unknown:
+            print(f"    {m}")
+    print()
+    print("  A model in UNKNOWN has no capability data recorded. That is not the")
+    print("  same as text-only: it means nobody has checked. Run `probe` against")
+    print("  its provider, which reports a published modality list when there is")
+    print("  one, or record it by hand in drawtle/model_registry.json.")
+    return 0
+
+
+def _cmd_overlay(a):
+    """Show the user-side store that the control centre writes to.
+
+    Printed first in the UI's own default view, so a reader can see at a glance
+    whether their edits are live and where they live, without going looking for
+    a file in an appdata directory.
+    """
+    st = DSC.overlay_status()
+    print("user overlay  (edits from the control centre)")
+    print(f"  file            : {st['path']}")
+    print(f"  exists          : {'yes' if st['exists'] else 'no'}")
+    print(f"  last written    : {st['updated_iso'] or '-'}")
+    print(f"  providers edited: {st['n_providers_added_or_edited']}")
+    print(f"  providers hidden: {st['n_providers_removed']}")
+    print(f"  models edited   : {st['n_models_added_or_edited']}")
+    print(f"  models hidden   : {st['n_models_removed']}")
+    print()
+    print(f"  {st['note']}")
+    return 0
+
+
 def main(argv=None):
     import argparse
     p = argparse.ArgumentParser(
@@ -614,6 +746,17 @@ def main(argv=None):
     s.add_argument("--filter", default=None)
     s.set_defaults(fn=_cmd_fetch)
 
+    s = sub.add_parser("probe", help="ask every provider now, live, with no cache")
+    s.add_argument("backend", nargs="?", default=None)
+    s.add_argument("--timeout", type=float, default=12.0)
+    s.add_argument("-v", "--verbose", action="store_true",
+                   help="list every discovered model with its provenance")
+    s.set_defaults(fn=_cmd_probe)
+
+    s = sub.add_parser("capabilities",
+                       help="which models can accept an image (image_in)")
+    s.set_defaults(fn=_cmd_capabilities)
+
     s = sub.add_parser("show", help="show one model's limits")
     s.add_argument("model")
     s.add_argument("--backend", default=None)
@@ -629,6 +772,9 @@ def main(argv=None):
 
     s = sub.add_parser("price-update", help="report which limits are unknown")
     s.set_defaults(fn=_cmd_price_update)
+
+    s = sub.add_parser("overlay", help="show the user-side edit store")
+    s.set_defaults(fn=_cmd_overlay)
 
     a = p.parse_args(argv)
     return a.fn(a)

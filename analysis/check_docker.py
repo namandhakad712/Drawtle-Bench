@@ -56,6 +56,28 @@ REQUIRED_DATA = [
     "configs/default.json",
 ]
 
+#: Paths that must NEVER reach the image. Docker has no notion of .gitignore, so
+#: `COPY configs/ ./configs/` would otherwise bring `configs/.env` -- live API
+#: keys -- into a layer, where they are permanent and readable by anyone who can
+#: pull the image. A later `rm` in the same RUN does not undo it: the layer that
+#: contained the file still contains it.
+#:
+#: Checked against .dockerignore, so the guard fails when either the Dockerfile
+#: starts copying a new directory or the ignore file stops excluding it.
+FORBIDDEN_IN_IMAGE = [
+    ".env",
+    "configs/.env",
+    "credentials.json",
+    "overlay.json",
+    ".git",
+]
+
+#: Modules inside the `web` package that the server imports. `bench.py` only
+#: imports `web`, so a module added to the package after the Dockerfile was
+#: written would pass the top-level check and fail at run time -- inside the
+#: container, after a run had been started.
+WEB_SUBMODULES = ["server", "views", "theme", "guard", "supervisor"]
+
 
 def local_imports(path):
     """Top-level module names imported by a Python file, repo-local only.
@@ -171,13 +193,132 @@ def main():
         return 1
     print(f"  PASS: all {len(REQUIRED_DATA)} runtime data files are in the image.")
 
+    # A secret in a layer is permanent, so this is a hard failure rather than a
+    # warning. The check reads .dockerignore and asks whether each forbidden
+    # path is actually excluded from the build context.
+    ignore_path = os.path.join(ROOT, ".dockerignore")
+    if not os.path.exists(ignore_path):
+        print("  FAIL: there is no .dockerignore, so every secret in the repo "
+              "reaches the build context.")
+        print("        `COPY configs/` would bring configs/.env -- live API keys "
+              "-- into an image layer, where they cannot be removed.")
+        return 1
+    rules = _ignore_rules(open(ignore_path, "r", encoding="utf-8").read())
+    leaked = [p for p in FORBIDDEN_IN_IMAGE
+              if os.path.exists(os.path.join(ROOT, *p.split("/")))
+              and not _is_ignored(p, rules)]
+    if leaked:
+        for p in leaked:
+            print(f"  FAIL: {p} exists in the repo and is NOT excluded by "
+                  f".dockerignore.")
+            print("        A secret copied into an image layer stays in that "
+                  "layer permanently.")
+        return 1
+    present = [p for p in FORBIDDEN_IN_IMAGE
+               if os.path.exists(os.path.join(ROOT, *p.split("/")))]
+    print(f"  PASS: {len(present)} secret/local path(s) present in the repo are "
+          f"excluded from the build context.")
+
+    # bench.py imports `web`, so the top-level check above passes even if a
+    # module inside that package is missing from the image.
+    missing = [m for m in WEB_SUBMODULES
+               if not os.path.exists(os.path.join(ROOT, "web", m + ".py"))]
+    if missing:
+        print(f"  FAIL: web/ is missing {', '.join(missing)}, which the server "
+              f"imports.")
+        return 1
+    print(f"  PASS: all {len(WEB_SUBMODULES)} web submodules the server needs "
+          f"exist and ship inside web/.")
+
     # The rasteriser is optional for the mock backend but load-bearing for any
     # real vision backend. Warn once rather than fail, because a text-only or
     # mock-only run does not need it.
     if "cairosvg" not in text:
         print("  WARN: the image does not install cairosvg; real vision runs "
               "inside it will have no frames to send.")
+
+    # Version strings. Two hand-maintained copies had already drifted apart
+    # (pyproject said 2.5.0, the dashboard said 2.1.0), and a UI reporting a
+    # version the code does not have is worse than reporting none.
+    drift = _version_drift()
+    if drift:
+        print(f"  FAIL: version strings disagree: {drift}")
+        print("        drawtle/__init__.py is the source of truth; the others "
+              "must match it.")
+        return 1
+    print(f"  PASS: version is consistent ({drift or _pkg_version()}).")
     return 0
+
+
+def _pkg_version():
+    try:
+        import tomllib
+        with open(os.path.join(ROOT, "pyproject.toml"), "rb") as fh:
+            return tomllib.load(fh)["project"]["version"]
+    except Exception:
+        return None
+
+
+def _version_drift():
+    """Return a description of any disagreement, or None when consistent."""
+    py = _pkg_version()
+    try:
+        sys.path.insert(0, ROOT)
+        from drawtle import __version__ as pkg
+    except Exception as e:
+        return f"could not import drawtle.__version__ ({e})"
+    if py != pkg:
+        return f"pyproject={py!r} vs drawtle.__version__={pkg!r}"
+    # The server must derive from the package, not hardcode its own copy.
+    src = open(os.path.join(ROOT, "web", "server.py"), encoding="utf-8").read()
+    if 'from drawtle import __version__ as VERSION' not in src:
+        return "web/server.py does not read drawtle.__version__"
+    return None
+
+
+def _ignore_rules(text):
+    """Parse .dockerignore into (patterns, negations).
+
+    Docker's format is close enough to gitignore's for this purpose: one pattern
+    per line, `#` comments, `!` to re-include. Kept deliberately simple -- the
+    check needs to answer "is this path excluded?", not to reimplement Docker's
+    matcher, and a wrong answer here is caught by the `!` handling below.
+    """
+    patterns, negations = [], []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("!"):
+            negations.append(line[1:].strip().rstrip("/"))
+        else:
+            patterns.append(line.rstrip("/"))
+    return patterns, negations
+
+
+def _is_ignored(rel_path, rules):
+    """Does .dockerignore exclude this repo-relative path?
+
+    Matches on the path itself, on any ancestor directory, and on the basename,
+    which covers the three forms actually used in the file (`configs/.env`,
+    `.env`, and `**/.env`). A negation that re-includes the path wins.
+    """
+    patterns, negations = rules
+    parts = rel_path.split("/")
+    candidates = {rel_path, parts[-1]}
+    for i in range(1, len(parts)):
+        candidates.add("/".join(parts[:i]))
+    for neg in negations:
+        if rel_path == neg or parts[-1] == neg or rel_path.endswith("/" + neg):
+            return False
+    for pat in patterns:
+        if pat.startswith("**/"):
+            pat = pat[3:]
+        if pat in candidates or rel_path == pat:
+            return True
+        if pat.endswith("/*") and rel_path.startswith(pat[:-2] + "/"):
+            return True
+    return False
 
 
 if __name__ == "__main__":

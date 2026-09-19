@@ -1,5 +1,99 @@
 # Changelog
 
+## v2.6.0 — control centre, live provider discovery, and the models imported from two agent harnesses
+- **`web/` is now a control centre, not a report.** It was read-only: it rendered
+  summaries a CLI had already produced. It now configures providers and models,
+  discovers what a provider actually offers, launches runs as child processes,
+  streams their output, and stops them. One document, seven views
+  (Overview / Providers / Models / Launch / Results / Logs / System), no CDN and
+  no build step -- it renders in whatever environment the bench runs in.
+- **Provider and model edits go to a user-side overlay, never to the repo.**
+  `drawtle/providers.json` and `drawtle/model_registry.json` are versioned files
+  and a run's provenance points at them; a dashboard that wrote to them would
+  make every click produce a dirty working tree and conflict with a pull. Edits
+  land in `overlay.json` in the user config directory and are merged over the
+  shipped defaults at read time. Precedence is the opposite of the credential
+  store's, deliberately: **environment beats file for keys, overlay beats repo
+  for config**, and both are the same rule -- the user's explicit action wins.
+- **`drawtle/discovery.py` -- live discovery with no cache at all.** The earlier
+  design cached a model list on disk, which made a stale list indistinguishable
+  from a fresh one. Every probe now goes to the network, and each model comes
+  back with **per-field provenance**: `context_window` tagged `api` (the
+  provider published it, this call) or `local_table` (it did not, and the figure
+  is ours). There is no third state in which a cached number is shown as current.
+- **Twelve more providers, imported from two agent-harness configs.** `intern`,
+  `agnes`, `nararouter`, `poolside`, `inferx`, `opencode`, `opencode-custom`,
+  `atria-dawn-internlm`, `token-harbor`, `institute-of-foundation-models`, plus
+  discovery routes corrected for `internlm`. All speak OpenAI-completions, so
+  each is a registry entry and no new code. **22 providers, 90 models.**
+- **Per-model capabilities, with the source of the claim recorded.** Vocabulary
+  `image_in` / `video_in` / `audio_in` / `thinking` / `always_thinking` /
+  `tool_use`, and `capability_source` distinguishes a harness-config declaration
+  from a provider-published list from "unchecked". The distinction is
+  load-bearing: **a model with no `capabilities` key is unchecked, which is not
+  the same as text-only**, and the UI renders three states rather than two.
+  `image_in` is the one this bench depends on -- a model without it cannot read
+  a rendered frame, so a frame run against it measures nothing.
+- **25 models can read a frame; 16 are declared text-only; 49 are unchecked.**
+  `python -m drawtle.catalog capabilities` prints the split.
+- **InternLM's usage block, verified against the live endpoint.** The registry
+  recorded "the reference does not document a `usage` object, so treat counts as
+  estimated". A real call disproved it: the response carries
+  `prompt_tokens`/`completion_tokens`/`total_tokens`, so those counts are
+  `measured`. No pricing is published, so cost stays unknown -- measured tokens
+  with an unknown price is a different and more useful state than estimated
+  tokens with an unknown price. A real 80 KB frame was accepted by `intern-s2`,
+  `intern-s1` and `internvl3.5-latest` (623 / 1870 / 1950 prompt tokens for the
+  same image, which is why prompt cost differs sharply between them).
+- **A stopped run is recorded as stopped, and no longer vanishes.** Two defects,
+  both found by testing rather than by reading:
+  - On Windows, `CTRL_BREAK_EVENT` does not raise `KeyboardInterrupt` in the
+    child; it terminates it at the OS level with `0xC000013A`, so **no Python
+    cleanup can run**. A run stopped from the dashboard left its status file
+    reading `started` forever, which every reader treats as "still in progress".
+    The stop is now recorded by the parent, narrowly: only when the run has not
+    already recorded a terminal status of its own.
+  - A run that does not finish **never writes a summary**, so enumerating runs
+    by `*.summary.json` omitted precisely the runs a reader needs to see -- and
+    the omission was invisible, because a missing row looks like a run that never
+    existed. `stats.enumerate_runs` now finds runs by any of their own files, and
+    `excluded_runs` reports summary-less runs with their reason. A summary-less
+    run is still never *ranked*: it has no progress figure, and inventing one
+    from a partial log would be a fabricated number.
+- **`bench.py runs` distinguishes stopped from unproven.** Three situations were
+  reported under one sentence: a run to resume, and a run that predates status
+  tracking and can be neither trusted nor called a failure. Calling a committed
+  reference-policy run "did not finish cleanly" was simply wrong.
+- **The runner's interrupt handler now covers the whole episode loop.** It was
+  inside the loop, so it could not see a stop that arrived between episodes.
+- **`.dockerignore` added, and a check that enforces it.** The Dockerfile does
+  `COPY configs/ ./configs/` and Docker has no notion of `.gitignore`, so
+  `configs/.env` -- live API keys -- was being copied into an image layer, where
+  it is permanent and readable by anyone who can pull the image. A later `rm` in
+  the same `RUN` does not undo it. `analysis/check_docker.py` now fails if a
+  secret path is not excluded, and the guard was falsified (removing the
+  exclusion makes it fail) rather than assumed to work.
+- **`frames.rasteriser_status()` -- reported, not assumed.** A missing
+  rasteriser is invisible until a run reaches its first turn, and the packages
+  are per-interpreter, so "I installed it" and "the bench can use it" are
+  different statements. The System view names the interpreter it tested and
+  renders a 2x2 image to prove the native libraries load. Playwright was
+  installed into the interpreter that runs the bench, so frame rendering now
+  works end to end.
+- **The project `.env` is loaded by the library, not only by a shell.** A key
+  was present in one terminal and absent in another, and the failure looked like
+  "provider rejects key" rather than "key was never loaded". An exported
+  variable still wins.
+- **Launch refuses rather than coerces.** A bad provider name, a
+  path-traversing run id, a zero context window, a negative price: each is
+  rejected with a reason. Silent coercion produces configuration that does not
+  match what was typed, and the mismatch is invisible afterwards. No route takes
+  a command string; the argv is assembled from type-checked fields and the
+  process is never started through a shell.
+- **`analysis/test_control_centre.py` -- 76 checks** over every route including
+  the writing ones, with the overlay restored afterwards so running it twice is
+  the same as running it once.
+
 ## v2.5.0 — provider-agnostic backends, correct token accounting, cost per session
 - **Token accounting was wrong, and wrong in a way that produced plausible
   numbers.** `runner._turn_rec` wrote `prompt_tokens = input + output` and

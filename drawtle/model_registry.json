@@ -20,13 +20,27 @@
     "",
     "Prices change without notice. Run `python -m drawtle.catalog price-update`",
     "to see which entries are missing a field, and re-check the provider's",
-    "pricing page before budgeting a large run."
+    "pricing page before budgeting a large run.",
+    "",
+    "capabilities + capability_source",
+    "  Per-model capability list. Vocabulary: image_in, video_in, audio_in,",
+    "  thinking, always_thinking, tool_use. `image_in` is the one this bench",
+    "  depends on: a model without it cannot read a rendered frame, so a",
+    "  frame-based run against it measures nothing.",
+    "",
+    "  capability_source records WHERE the list came from, and the",
+    "  distinction is load-bearing:",
+    "    harness_config  declared in an agent-harness config the model was",
+    "                    imported from. Not this project's own measurement.",
+    "    api             the provider published a modality list, observed",
+    "                    live on its model-list endpoint.",
+    "    by construction true of the mock backend and nothing else.",
+    "  A model with NO `capabilities` key is UNCHECKED. That is not the same",
+    "  as text-only, and the UI must not render it as though it were."
   ],
-
-  "version": 1,
-  "updated": 1789756800,
-  "updated_jst": "2026-09-18",
-
+  "version": 2,
+  "updated": 1789758149,
+  "updated_jst": "2026-09-19",
   "models": {
     "gemini-2.5-flash": {
       "provider": "google",
@@ -36,11 +50,28 @@
       "price_out": 0.0025,
       "price_known": true,
       "free_tier": true,
-      "modalities": ["text", "image", "video", "audio"],
-      "reasoning_effort_levels": ["low", "medium", "high"],
+      "modalities": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "reasoning_effort_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
       "source": "ai.google.dev/gemini-api/docs/models/gemini-2.5-flash",
       "checked": "2026-09-18",
-      "notes": "Default backend model. Free tier trains on your data; paid does not."
+      "notes": "Default backend model. Free tier trains on your data; paid does not.",
+      "capabilities": [
+        "audio_in",
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "api"
     },
     "gemini-2.5-flash-lite": {
       "provider": "google",
@@ -50,11 +81,28 @@
       "price_out": 0.0004,
       "price_known": true,
       "free_tier": true,
-      "modalities": ["text", "image", "video", "audio"],
-      "reasoning_effort_levels": ["low", "medium", "high"],
+      "modalities": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "reasoning_effort_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
       "source": "ai.google.dev/gemini-api/docs/pricing",
       "checked": "2026-09-18",
-      "notes": "Cheapest multimodal option. Limits from the 2.5 family page; re-verify before a large run."
+      "notes": "Cheapest multimodal option. Limits from the 2.5 family page; re-verify before a large run.",
+      "capabilities": [
+        "audio_in",
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "api"
     },
     "gemini-2.5-pro": {
       "provider": "google",
@@ -64,11 +112,28 @@
       "price_out": 0.01,
       "price_known": true,
       "free_tier": true,
-      "modalities": ["text", "image", "video", "audio"],
-      "reasoning_effort_levels": ["low", "medium", "high"],
+      "modalities": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "reasoning_effort_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
       "source": "ai.google.dev/gemini-api/docs/pricing",
       "checked": "2026-09-18",
-      "notes": "Price shown is the <=200k-token tier; drops to $2.50/$15.00 per 1M above that. The bench's runs stay well under 200k."
+      "notes": "Price shown is the <=200k-token tier; drops to $2.50/$15.00 per 1M above that. The bench's runs stay well under 200k.",
+      "capabilities": [
+        "audio_in",
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "api"
     },
     "gemini-3.8-flash": {
       "provider": "google",
@@ -76,11 +141,24 @@
       "max_output": null,
       "price_in": null,
       "price_out": null,
-      "modalities": ["text", "image"],
-      "reasoning_effort_levels": ["low", "medium", "high"],
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_effort_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
       "source": "ai.google.dev/gemini-api/docs/models",
       "checked": "2026-09-18",
-      "notes": "Listed as current stable Flash. Limits NOT looked up -- the 3.x per-model pages were not fetched. Treat every null here as a lookup to do."
+      "notes": "Listed as current stable Flash. Limits NOT looked up -- the 3.x per-model pages were not fetched. Treat every null here as a lookup to do.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "api"
     },
     "gpt-4o": {
       "provider": "openai",
@@ -88,11 +166,19 @@
       "max_output": 16384,
       "price_in": 0.0025,
       "price_out": 0.01,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "carried over from DEFAULT_PRICES; not re-verified",
       "checked": "2026-09-18",
-      "notes": "Not a reasoning model -- no effort control. Limits unverified against OpenAI's current docs."
+      "notes": "Not a reasoning model -- no effort control. Limits unverified against OpenAI's current docs.",
+      "capabilities": [
+        "image_in",
+        "tool_use"
+      ],
+      "capability_source": "api"
     },
     "gpt-4o-mini": {
       "provider": "openai",
@@ -100,11 +186,19 @@
       "max_output": 16384,
       "price_in": 0.00015,
       "price_out": 0.0006,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "carried over from DEFAULT_PRICES; not re-verified",
       "checked": "2026-09-18",
-      "notes": "Limits unverified against OpenAI's current docs."
+      "notes": "Limits unverified against OpenAI's current docs.",
+      "capabilities": [
+        "image_in",
+        "tool_use"
+      ],
+      "capability_source": "api"
     },
     "claude-3-5-sonnet": {
       "provider": "anthropic",
@@ -112,11 +206,19 @@
       "max_output": 8192,
       "price_in": 0.003,
       "price_out": 0.015,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "carried over from DEFAULT_PRICES; not re-verified",
       "checked": "2026-09-18",
-      "notes": "Anthropic's extended thinking is a token budget, not an effort level, so it is deliberately NOT mapped here."
+      "notes": "Anthropic's extended thinking is a token budget, not an effort level, so it is deliberately NOT mapped here.",
+      "capabilities": [
+        "image_in",
+        "tool_use"
+      ],
+      "capability_source": "api"
     },
     "claude-3-5-haiku": {
       "provider": "anthropic",
@@ -124,11 +226,19 @@
       "max_output": 8192,
       "price_in": 0.0008,
       "price_out": 0.004,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "carried over from DEFAULT_PRICES; not re-verified",
       "checked": "2026-09-18",
-      "notes": "Limits unverified against Anthropic's current docs."
+      "notes": "Limits unverified against Anthropic's current docs.",
+      "capabilities": [
+        "image_in",
+        "tool_use"
+      ],
+      "capability_source": "api"
     },
     "mock": {
       "provider": "local",
@@ -137,13 +247,16 @@
       "price_known": true,
       "price_in": 0.0,
       "price_out": 0.0,
-      "modalities": ["text"],
+      "modalities": [
+        "text"
+      ],
       "reasoning_effort_levels": null,
       "source": "by construction",
       "checked": "2026-09-18",
-      "notes": "Zero price is correct here: MockBackend makes no network call."
+      "notes": "Zero price is correct here: MockBackend makes no network call.",
+      "capabilities": [],
+      "capability_source": "by construction"
     },
-
     "intern-s2": {
       "provider": "internlm",
       "context_window": 262144,
@@ -152,13 +265,22 @@
       "price_out": null,
       "price_known": false,
       "free_tier": true,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "internlm.intern-ai.org.cn/doc/docs/Chat/ (checked 2026-09-18)",
       "checked": "2026-09-18",
-      "notes": "Context window is the PUBLISHED figure, not a measured one. max_output and price are null because InternLM publishes neither: cost is reported as 0.0 with cost_known=false, so a run against this model must not be quoted as free. `thinking_mode` defaults ON for this family and is not exposed here, so output token counts will be higher than a non-thinking model's. `intern-latest` is an alias for this model -- kept separate rather than resolved, because an alias can be repointed by the provider and a run's logs must record what was actually asked for."
+      "notes": "Context window is the PUBLISHED figure, not a measured one. max_output and price are null because InternLM publishes neither: cost is reported as 0.0 with cost_known=false, so a run against this model must not be quoted as free. `thinking_mode` defaults ON for this family and is not exposed here, so output token counts will be higher than a non-thinking model's. `intern-latest` is an alias for this model -- kept separate rather than resolved, because an alias can be repointed by the provider and a run's logs must record what was actually asked for.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
     },
-
     "intern-s2-preview-35b": {
       "provider": "internlm",
       "context_window": 262144,
@@ -167,13 +289,22 @@
       "price_out": null,
       "price_known": false,
       "free_tier": true,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "internlm.intern-ai.org.cn/doc/docs/Chat/ (checked 2026-09-18)",
       "checked": "2026-09-18",
-      "notes": "Preview model with a stated retirement date of 2026-10-31. Do not build a long-running comparison on it."
+      "notes": "Preview model with a stated retirement date of 2026-10-31. Do not build a long-running comparison on it.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
     },
-
     "intern-s1-pro": {
       "provider": "internlm",
       "context_window": 262144,
@@ -182,13 +313,22 @@
       "price_out": null,
       "price_known": false,
       "free_tier": true,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "internlm.intern-ai.org.cn/doc/docs/Chat/ (checked 2026-09-18)",
       "checked": "2026-09-18",
-      "notes": "Published context window. No published price or output limit."
+      "notes": "Published context window. No published price or output limit.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
     },
-
     "intern-s1": {
       "provider": "internlm",
       "context_window": 32768,
@@ -197,13 +337,21 @@
       "price_out": null,
       "price_known": false,
       "free_tier": true,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "internlm.intern-ai.org.cn/doc/docs/Chat/ (checked 2026-09-18)",
       "checked": "2026-09-18",
-      "notes": "32K window. On this bench every prior frame is re-sent each turn, so a 32K model will run out of context on the longer episodes -- expect context-limit errors rather than a low score."
+      "notes": "32K window. On this bench every prior frame is re-sent each turn, so a 32K model will run out of context on the longer episodes -- expect context-limit errors rather than a low score.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
     },
-
     "intern-s1-mini": {
       "provider": "internlm",
       "context_window": 32768,
@@ -212,13 +360,22 @@
       "price_out": null,
       "price_known": false,
       "free_tier": true,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "internlm.intern-ai.org.cn/doc/docs/Chat/ (checked 2026-09-18)",
       "checked": "2026-09-18",
-      "notes": "32K window, same context caveat as intern-s1."
+      "notes": "32K window, same context caveat as intern-s1.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
     },
-
     "internvl3.5-241b-a28b": {
       "provider": "internlm",
       "context_window": 32768,
@@ -227,11 +384,681 @@
       "price_out": null,
       "price_known": false,
       "free_tier": true,
-      "modalities": ["text", "image"],
+      "modalities": [
+        "text",
+        "image"
+      ],
       "reasoning_effort_levels": null,
       "source": "internlm.intern-ai.org.cn/doc/docs/Chat/ (checked 2026-09-18)",
       "checked": "2026-09-18",
-      "notes": "InternVL vision-language model, 32K window. `internvl3.5-latest` is an alias."
+      "notes": "InternVL vision-language model, 32K window. `internvl3.5-latest` is an alias.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "intern-s2-preview-397b": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
+    },
+    "agnes-2.0-flash": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "agnes-2.5-flash": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "agnes-3.0-flash": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "big-pickle": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "mimo-v2.5-free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "audio_in",
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
+    },
+    "muse-spark-1.2-contributor-free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "always_thinking",
+        "audio_in",
+        "image_in",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
+    },
+    "muse-spark-1.2": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "always_thinking",
+        "audio_in",
+        "image_in",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config",
+      "notes": "Router id. On the opencode gateway this model is always_thinking and multimodal; the router likely serves the same weights, but that is an inference and is not recorded as a capability here."
+    },
+    "muse-spark-1.3-contributor-free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "always_thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config",
+      "context_window": 1000000,
+      "max_output": 32000,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "notes": "Muse Spark 1.3, free tier. The TOML config lists the 1.2 revision with always_thinking; 1.3 was added later and the TOML does not cover it, so check the modality before a frame run rather than assuming it inherits 1.2's capabilities."
+    },
+    "nemotron-3-ultra-free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "nemotron-3.5-lightning-free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "ling-3.0-flash-fin-free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "Qwen3.6-35B-A3B-FP8": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "audio_in",
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
+    },
+    "Qwen3-Coder-Next-FP8": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "Qwen3-Coder-Next-FP8-no-thinking": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "gemma-4-31B-it-fp8": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "gpt-oss-20b": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "poolside/laguna-s-2.1": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "notes": "CONFLICT: the TOML config gives max_context_size 1000000 and an output limit of 65536, while the dsh config gives 262144 and no output limit for the same id. Neither is a measurement. The larger figure is recorded here because it comes from the richer config, but treat the window as unverified and expect a context error past 262K rather than a low score."
+    },
+    "poolside/laguna-xs-2.1": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config",
+      "context_window": 256000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "notes": "Same conflict as laguna-s-2.1, smaller gap (256000 vs 262144). Unverified."
+    },
+    "Atria-Dawn-Preview": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "deepseek-v4.1-flash:free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "deepseek-v4-flash:free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "mimo-v2.5:free": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "audio_in",
+        "image_in",
+        "thinking",
+        "tool_use",
+        "video_in"
+      ],
+      "capability_source": "harness_config"
+    },
+    "IFM/K2-Horizon-375B-A23B": {
+      "provider": null,
+      "source": "capability backfill",
+      "checked": "2026-09-19",
+      "capabilities": [
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "stepfun-3.7-flash": {
+      "provider": "nararouter",
+      "context_window": 262000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Reached through the NaraRouter gateway. The router does not publish pricing or an output limit, and neither does the upstream vendor's listing that we can see, so both are null.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "laguna-s-2.1": {
+      "provider": "nararouter",
+      "context_window": 262000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Poolside's Laguna S served through NaraRouter. The id here has NO `poolside/` prefix, unlike on the Poolside direct endpoint -- two different ids for one model, so a comparison across the two providers is comparing transports as well."
+    },
+    "atria-dawn": {
+      "provider": "nararouter",
+      "context_window": 256000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Atria Dawn through NaraRouter, id `atria-dawn`. The direct Atria endpoint uses the capitalised id `Atria-Dawn-Preview`."
+    },
+    "tencent-hy3-free": {
+      "provider": "nararouter",
+      "context_window": 192000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Hunyuan 3, free tier. The `-free` suffix is part of the id."
+    },
+    "ling-3.0-flash-sante-free": {
+      "provider": "nararouter",
+      "context_window": 262000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id for the Ling 3.0 Flash fine-tune. Free tier."
+    },
+    "ling-3.0-flash-vl-free": {
+      "provider": "nararouter",
+      "context_window": 262000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "The VL variant of Ling 3.0 Flash: the `vl` in the id is the vision-language marker, so this is the one Ling id worth a frame run. Kept separate from the fin and sante variants, which are text-only."
+    },
+    "nemotron-3-super-free": {
+      "provider": "nararouter",
+      "context_window": 262000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Free tier via NaraRouter."
+    },
+    "nex-n2.5-pro": {
+      "provider": "nararouter",
+      "context_window": 262000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Free tier via NaraRouter."
+    },
+    "hy3-free": {
+      "provider": "opencode",
+      "context_window": 190000,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "~/.kimi-code/config.toml (checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Hunyuan 3 free tier on the Zen gateway. Supports reasoning effort low/medium/high per the TOML config.",
+      "reasoning_effort_levels": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "deepseek-v4-flash-vision-exp": {
+      "provider": "opencode",
+      "context_window": null,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "live discovery on opencode-custom (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live. The `vision-exp` in the id says it takes images but the provider publishes no modality list and no context window, so both are unchecked here. Experimental, so do not build a long comparison on it."
+    },
+    "deepseek-v4-flash-free": {
+      "provider": "opencode",
+      "context_window": null,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "live discovery on opencode-custom (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window or modality list."
+    },
+    "IFM/K2-Think-v2": {
+      "provider": "institute-of-foundation-models",
+      "context_window": null,
+      "max_output": null,
+      "price_in": null,
+      "price_out": null,
+      "price_known": false,
+      "source": "live discovery on institute-of-foundation-models (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; the provider publishes ids only. No key is configured for this provider yet, so this entry is a placeholder recording that the id exists."
+    },
+    "claude-fable-5": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "claude-fable-5.1": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "claude-opus-4.7": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "claude-opus-4.8": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "claude-opus-5": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "claude-sonnet-5": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "deepseek-v4-flash-alibaba": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "deepseek-v4-pro-alibaba": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "glm-5.2": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "glm-5.3": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "gpt-5.6-luna": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "gpt-5.6-sol": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "gpt-5.6-terra": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "kimi-k2.7-code": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "kimi-k3": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "mimo-v2.5": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "minimax-m3": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "muse-spark-1.2-contributor": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "muse-spark-1.3": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "muse-spark-1.3-contributor": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "gemini-3.1-pro-high": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "gemini-3.8-flash-high": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "agnes-video-v2.0": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Video generation model exposed in the same list as the chat models. It will not answer a chat request -- kept in the table only so a discovery of the router shows it as known rather than new."
+    },
+    "agnes-3-flash": {
+      "provider": "nararouter",
+      "context_window": 512000,
+      "source": "~/.dsh/settings.yaml (nararouter block, checked 2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Agnes 3 Flash via the router. The dsh config lists image input for this id.",
+      "capabilities": [
+        "image_in",
+        "thinking",
+        "tool_use"
+      ],
+      "capability_source": "harness_config"
+    },
+    "deepseek-v4.1-flash": {
+      "provider": "inferx",
+      "source": "live discovery on inferx (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window."
+    },
+    "glm-5.3-flash": {
+      "provider": "inferx",
+      "source": "live discovery on inferx (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window."
+    },
+    "gpt-6-astra": {
+      "provider": "nararouter",
+      "source": "live discovery on nararouter (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Router id; no published window or modalities."
+    },
+    "agnes-image-2.0-flash": {
+      "provider": "agnes",
+      "source": "live discovery on agnes (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "IMAGE GENERATION model, not a chat model. It appears in the same discovery list as the chat models because this provider's /v1/models mixes them. A chat request against it will fail."
+    },
+    "agnes-image-2.1-flash": {
+      "provider": "agnes",
+      "source": "live discovery on agnes (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "IMAGE GENERATION model, not a chat model."
+    },
+    "agnes-image-2.5-flash": {
+      "provider": "agnes",
+      "source": "live discovery on agnes (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "IMAGE GENERATION model, not a chat model."
+    },
+    "agnes-video-2.5": {
+      "provider": "agnes",
+      "source": "live discovery on agnes (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "VIDEO GENERATION model, not a chat model."
+    },
+    "agnes-video-2.5-flash": {
+      "provider": "agnes",
+      "source": "live discovery on agnes (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "VIDEO GENERATION model, not a chat model."
+    },
+    "agnes-2.5-pro": {
+      "provider": "agnes",
+      "source": "live discovery on agnes (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window or modalities."
+    },
+    "agnes-2.5-pro-alpha": {
+      "provider": "agnes",
+      "source": "live discovery on agnes (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window or modalities."
+    },
+    "agnes-2.5-pro-beta": {
+      "provider": "agnes",
+      "source": "live discovery on agnes (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window or modalities."
+    },
+    "Agents-A1": {
+      "provider": "inferx",
+      "source": "live discovery on inferx (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window."
+    },
+    "Devstral-2-123B-Instruct-2512-int4-AutoRound": {
+      "provider": "inferx",
+      "source": "live discovery on inferx (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window. Quantised, so its output is not comparable to the unquantised release."
+    },
+    "Qwen3.8-27B-FP8": {
+      "provider": "inferx",
+      "source": "live discovery on inferx (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window."
+    },
+    "deepseek-v4-flash-0731": {
+      "provider": "inferx",
+      "source": "live discovery on inferx (2026-09-19)",
+      "checked": "2026-09-19",
+      "notes": "Discovered live; no published window."
     }
   }
 }
