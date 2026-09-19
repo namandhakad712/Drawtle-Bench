@@ -22,13 +22,13 @@ isolation and it holds even when you run the bench on your laptop.
 
 ## Layer 2 — OS isolation (for untrusted / paid models)
 
-> **Status: specification, not verified.** This layer has never been executed on
-> the machine this bench was developed on, because Docker is not installed
-> there. Every committed run therefore reports `sandbox : none`. The commands
-> below are the intended contract; treat them as untested until you have run
-> `python bench.py runs` inside the container and seen `level: docker`.
-> `analysis/check_docker.py` does verify statically that the image contains
-> everything `bench.py` imports, so a build cannot silently omit a package.
+> **Status: executed.** This layer has been run: the container builds, `run`
+> works end to end (mock backend), and a run inside reports `level: docker`.
+> The allow-list egress proxy (`egress-proxy`) is also run-tested: an
+> allow-listed provider host tunnels through, a non-listed host is refused with
+> 403, and both decisions appear in `docker compose logs egress-proxy`.
+> Boards/`results` still come from the operator's own machine; keep that in
+> mind when reading the numbers.
 
 Run the bench inside the provided container:
 
@@ -56,12 +56,20 @@ docker compose -f docker/docker-compose.yml run --rm bench
   status file records the probe result rather than the intent.
 - Network egress is **denied by default**. The compose file's `bench-egress`
   network is `internal: true`, which gives the container no route outward —
-  correct for the mock backend. For a real backend you must either attach an
-  egress proxy that allow-lists `api.openai.com`, `api.anthropic.com` and
-  `generativelanguage.googleapis.com` (recommended; the SDKs honour
-  `HTTPS_PROXY`), or relax the network and accept that the container can reach
-  anything. Note that `network_mode: "none"` is *not* the way to do this: it
-  removes the interface entirely, so a real API call cannot be made at all.
+  correct for the mock backend. For a real backend the compose file ships an
+  **allow-list egress proxy** (`egress-proxy`, see `docker/egress-proxy.Dockerfile`
+  and `docker/egress_proxy.py`): it sits on the internal network *and* on a
+  normal one, so it is the single point through which a provider API call may
+  leave. It relays only the hosts in `ALLOW_HOSTS` (all providers from
+  `drawtle/providers.json` are listed by default); every other host gets `403`,
+  and each decision is logged (`docker compose logs egress-proxy`). The bench is
+  pointed at it via `HTTPS_PROXY`/`HTTP_PROXY`, which the provider SDKs honour.
+  If you add a provider, append its host to `ALLOW_HOSTS` in the compose file.
+  The weak alternative (relaxing the network so the container can reach
+  anything) is still documented in the compose header, but the proxy is the
+  recommended configuration and has been run-tested. Note that
+  `network_mode: "none"` is *not* the way to do this: it removes the interface
+  entirely, so a real API call cannot be made at all.
 - Results are written to a mounted volume; the container itself is ephemeral.
 - The image is checked at build time for importability, so a missing `COPY`
   fails `docker build` instead of failing mid-run.

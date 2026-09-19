@@ -6,32 +6,26 @@
 # unprivileged user in a throwaway container that has no route to the host
 # filesystem beyond the two mounted volumes.
 #
-# EGRESS: a benchmark that runs a model should not also be the thing that can
-# reach the internet. The default here is the `bench-egress` network, which is
-# an internal network -- Docker gives it no route outward, so the container can
-# reach nothing at all. That is the correct default for the mock backend, which
-# is what `command:` below runs.
+# EGRESS (the production setup):
+#   - `bench-egress`   -- internal network: the bench container has NO route
+#     outward at all. This is the correct default for the mock backend.
+#   - `egress-proxy`   -- a tiny allow-list proxy that sits on `bench-egress`
+#     AND on `egress-out`, so it is the only thing that can reach the internet.
+#     The bench reaches it as `http://egress-proxy:3128`; the proxy relays ONLY
+#     the hosts in ALLOW_HOSTS (the model providers) and denies everything else
+#     with 403. Provider SDKs honour HTTPS_PROXY, so no app-side change is
+#     needed beyond the two environment lines below.
 #
-#   For a REAL backend you must give the container a route to the provider and
-#   nothing else. Two options:
+#   What you do NOT get with a real backend until the proxy can reach it:
+#     nothing else -- no git, no PyPI, no arbitrary web. If a provider is not in
+#     ALLOW_HOSTS, its traffic is refused, and the refusal is visible in
+#     `docker compose logs egress-proxy` (allow/block lines per request).
 #
-#     (a) Quick, weak: `network_mode: "bridge"` (or delete the networks block).
-#         The container can then reach any host on the internet. Acceptable only
-#         on a trusted machine; it is NOT isolation.
+#   For a REAL backend, edit the ALLOW_HOSTS list below to match the providers
+#   you actually use, then:
+#     docker compose up -d egress-proxy
+#     docker compose -f docker/docker-compose.yml run --rm bench
 #
-#     (b) Correct: attach an egress proxy that allow-lists api.openai.com,
-#         api.anthropic.com, generativelanguage.googleapis.com and denies the
-#         rest, then point the backend at it:
-#             environment:
-#               - HTTPS_PROXY=http://proxy:3128
-#         The provider SDKs honour HTTPS_PROXY. This is the configuration the
-#         README and docker/sandbox.md describe.
-#
-#   Do not use `network_mode: "none"` together with a real backend: `none` means
-#   no network interface at all, so the API call cannot be made and the run dies
-#   on the first turn. That mistake was in an earlier revision of this file; the
-#   default below is `internal: true` on the network instead, which has the same
-#   effect for the mock backend while remaining switchable.
 services:
   bench:
     build:
@@ -46,6 +40,10 @@ services:
       # container cannot see the key even when the host has it set.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      # Only egress is through the allow-list proxy; everything else stays cut.
+      - HTTPS_PROXY=http://egress-proxy:3128
+      - HTTP_PROXY=http://egress-proxy:3128
+      - NO_PROXY=localhost,127.0.0.1,egress-proxy
       - PYTHONUNBUFFERED=1
       # Marks the process as sandboxed so drawtle.sandbox.describe() can report
       # `level: docker` truthfully from inside the container rather than
@@ -55,14 +53,42 @@ services:
       - ../results:/bench/results
       - ../configs:/bench/configs
     networks:
+      # The internal network only. The bench never sits on `egress-out`, so it
+      # cannot reach the internet even by asking the proxy for a route to a
+      # host that is not on the list.
       - bench-egress
+    depends_on:
+      - egress-proxy
     # Mock backend: needs no network. Verifies the image, the volumes, the
     # non-root user and the dataset path before any key is spent.
     command: ["run", "--backend", "mock", "--model", "mock", "--mode", "optimal",
               "--dataset", "results/dataset.json", "--out-dir", "results"]
 
+  egress-proxy:
+    build:
+      context: .
+      dockerfile: docker/egress-proxy.Dockerfile
+    image: drawtle-egress-proxy:latest
+    user: "1000:1000"
+    environment:
+      # The only hosts the sandbox may reach. Add your provider's host here if
+      # it is not listed; local/self-hosted models (localhost:*) are run on the
+      # host instead -- the container cannot reach your machine's localhost.
+      - ALLOW_HOSTS=api.openai.com,api.anthropic.com,generativelanguage.googleapis.com,api.deepseek.com,api.groq.com,api.mistral.ai,api.together.xyz,openrouter.ai,api.ifm.ai,inference.poolside.ai,apihub.agnes-ai.com,chat.intern-ai.org.cn,tokenharbor.ai,api.atria-asi.ai,router.bynara.id,model.inferx.net,opencode.ai
+      - PORT=3128
+    networks:
+      - bench-egress      # reachable by the bench
+      - egress-out        # the only interface with a route outward
+    # No ports published to the host. Nothing on your machine can talk to it,
+    # and it cannot be used as a general-purpose proxy.
+    restart: "no"
+
 networks:
   bench-egress:
     # internal: no route off the Docker network. The container cannot reach the
-    # internet OR the host. For a real backend, see the header comment.
+    # internet OR the host.
     internal: true
+  egress-out:
+    # Normal bridge -- exists only so the proxy can leave. Nothing else is ever
+    # attached to it.
+    driver: bridge

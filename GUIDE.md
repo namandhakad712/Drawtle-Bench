@@ -91,19 +91,37 @@ further step is needed. Alternatively set the variable in PowerShell:
 
 ---
 
-## Step 4 — Real providers need internet
+## Step 4 — Real providers need internet (the production setup)
 
 The sandbox network is `internal: true` by design (no internet). That is
-correct for the mock backend. For a real model, edit `docker/docker-compose.yml`:
+correct for the mock backend. For a real model, the repo now ships an
+**allow-list egress proxy** — the recommended configuration:
 
-- **Quick (weak):** change `internal: true` to `internal: false`, or add
-  `network_mode: "bridge"`. The container can then reach anything on the
-  internet; acceptable only on a trusted machine.
-- **Proper:** attach an egress proxy that allow-lists only the provider host
-  (see the header comment in `docker/docker-compose.yml`), then add
-  `HTTPS_PROXY=http://proxy:3128` to the service environment.
+- `egress-proxy` is a tiny container (`docker/egress_proxy.py`, stdlib only)
+  that sits on the internal network *and* on a normal one. It is the single
+  point through which an API call may leave.
+- It relays **only** the hosts listed in `ALLOW_HOSTS` in
+  `docker/docker-compose.yml` (all providers from `drawtle/providers.json` are
+  listed by default). Every other host gets `403`, and each decision is logged:
+  `docker compose logs egress-proxy`.
+- The bench points at it automatically via `HTTPS_PROXY`/`HTTP_PROXY`; the
+  provider SDKs honour those.
 
-Or run the model on the host instead of the container:
+To run a real model in the sandbox:
+
+1. Keep Docker Desktop running.
+2. Start the proxy: `docker compose -f docker/docker-compose.yml up -d egress-proxy`
+3. Run: `docker compose -f docker/docker-compose.yml run --rm bench` — but edit
+   the `command:` line in the compose file first, or pass your own:
+
+   ```
+   docker compose -f docker/docker-compose.yml run --rm bench run --backend gemini --model gemini-2.5-flash --dataset results/dataset.json --out-dir results
+   ```
+
+4. If you add a provider whose host is not listed, append it to `ALLOW_HOSTS`
+   (comma-separated) in the compose file and restart the proxy.
+
+You can still run a real model on the host instead of the container:
 
 ```
 python bench.py run --backend gemini --model gemini-2.5-flash --dataset results/dataset.json --out-dir results
