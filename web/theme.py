@@ -225,4 +225,14 @@ pre.log{
   border-radius:100px; box-shadow:0 5px 22px rgba(0,0,0,.22); max-width:88vw;
 }
 .toast.bad{background:var(--red)} .toast.good{background:var(--green)}
+
+/* ---------- storyboard ---------- */
+.sb-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(252px,1fr)); gap:14px}
+.sb-card{
+  text-align:left; cursor:pointer; font:inherit; color:var(--ink);
+  border:1px solid var(--rule); border-radius:var(--r); background:var(--white);
+  padding:13px 14px; transition:border-color .12s, box-shadow .12s, transform .12s;
+}
+.sb-card:hover{border-color:var(--blue); box-shadow:0 4px 16px rgba(26,79,138,.12); transform:translateY(-2px)}
+.sb-card .row{justify-content:space-between}
 """
