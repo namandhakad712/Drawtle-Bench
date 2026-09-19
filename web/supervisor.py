@@ -241,6 +241,27 @@ class Supervisor:
         job.returncode = job.proc.wait()
         job.finished = time.time()
         job._append(f"[supervisor] process exited with code {job.returncode}")
+        # Reconcile a hard exit. A child killed by SIGKILL/OOM (POSIX) or by the
+        # OS (Windows) never runs its own cleanup, so its status file can be left
+        # pinned on `started` forever -- which every reader treats as "still
+        # going". A non-zero exit whose status is still `started` is a crash, not
+        # a finish; record it as such. Zero and the controlled 130 (SIGINT) are
+        # left alone, because those paths write their own terminal status.
+        if job.returncode not in (0, 130):
+            try:
+                from drawtle import runstate as RS
+                if RS.status_of(self.results_dir, job.run_id) == RS.STATUS_STARTED:
+                    RS.mark_finished(
+                        self.results_dir, job.run_id, RS.STATUS_ERROR,
+                        {"error": f"process exited with code {job.returncode} "
+                                  f"and wrote no terminal status; the supervisor "
+                                  f"recorded the failure on its behalf",
+                         "returncode": job.returncode,
+                         "stopped_by": "supervisor-crash-detect"})
+                    job._append("[supervisor] child exited uncleanly; recorded "
+                                "as error")
+            except Exception as e:                 # pragma: no cover - rare
+                job._append(f"[supervisor] could not record the exit: {e}")
 
     # -- stopping --------------------------------------------------------
 

@@ -130,6 +130,17 @@ def aggregate(jsonl_path, meta=None):
     scored = [1 if r["progressed"] else 0 for r in records if r["progressed"] is not None]
     progressed = sum(scored) / len(scored) if scored else None
     ci = bootstrap_ci(scored)
+    # A CI is `(None, None)` when there is no scored turn to resample -- an
+    # episode that ended on its first turn, or a run stopped before any turn was
+    # scoreable. Reporting `[None, None]` is the honest answer ("no interval is
+    # computable"), and it is the ONLY answer available: `round(None, 3)` raised
+    # a TypeError, which killed the summary *after* the runner had already
+    # marked the run `success`, leaving a run that claimed to have succeeded and
+    # had no summary at all. An aggregator must be total -- it is the last step
+    # between a completed run and a readable result, so it is the worst place in
+    # the pipeline to raise.
+    ci_lo = round(ci[0], 3) if ci and ci[0] is not None else None
+    ci_hi = round(ci[1], 3) if ci and ci[1] is not None else None
 
     hit = [1 if r["hit_wall"] else 0 for r in records]
     invalid = [1 if r["invalid"] else 0 for r in records]
@@ -146,7 +157,14 @@ def aggregate(jsonl_path, meta=None):
         "n_turns": len(records),
         "n_episodes": len({r["episode"] for r in records}) if records else 0,
         "progress_rate": progressed,
-        "progress_ci95": [round(ci[0], 3), round(ci[1], 3)],
+        # `ci_lo`/`ci_hi` are the guarded versions: a run with no scored turn
+        # (every turn invalid, or a run stopped before any turn) has no
+        # interval to compute, and `bootstrap_ci` returns `(None, None)`.
+        # Rounding that directly raised a TypeError that killed the summary
+        # after the run was already marked `success`, leaving a ghost: a run
+        # claiming to have succeeded with no summary file. The guarded values
+        # are the answer the view must show.
+        "progress_ci95": [ci_lo, ci_hi],
         "hit_wall_rate": (sum(hit) / len(hit)) if hit else None,
         "invalid_rate": (sum(invalid) / len(invalid)) if invalid else None,
         # Input and output are reported separately and never recombined into a
