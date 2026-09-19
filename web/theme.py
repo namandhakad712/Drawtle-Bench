@@ -235,4 +235,13 @@ pre.log{
 }
 .sb-card:hover{border-color:var(--blue); box-shadow:0 4px 16px rgba(26,79,138,.12); transform:translateY(-2px)}
 .sb-card .row{justify-content:space-between}
+
+/* ---------- replay filmstrip ---------- */
+.striprow{display:flex; gap:6px; overflow-x:auto; padding:4px 0 10px; margin-bottom:6px}
+img.strip{
+  width:84px; height:84px; object-fit:cover; flex:none; cursor:pointer;
+  border:1px solid var(--rule); border-radius:var(--r2);
+  transition:border-color .12s, transform .12s;
+}
+img.strip:hover{border-color:var(--blue); transform:scale(1.06)}
 """

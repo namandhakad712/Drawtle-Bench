@@ -386,6 +386,37 @@ RENDER.overview = async function (v) {{
     + 'measured, and those numbers are real for the turns that were written -- '
     + 'they are just not comparable to a complete run.</div>');
 
+  // ---- analytics: what has actually been measured --------------------------
+  const all = runs.runs || [];
+  const byModel = {{}};
+  all.forEach(r => {{
+    const key = (r.model || "?") + "\\u0000" + (r.backend || "?");
+    const b = byModel[key] || {{ model: r.model, backend: r.backend, n: 0,
+      turned: 0, cost: 0, cost_known: 0, clean: 0, prog: 0, prog_n: 0 }};
+    b.n += 1;
+    b.turned += (r.n_turns || 0);
+    if (r.total_cost_usd != null && r.cost_known !== false) {{ b.cost += r.total_cost_usd; b.cost_known += 1; }}
+    if (r.status === "success") {{ b.clean += 1; }}
+    if (r.progress_rate != null) {{ b.prog += r.progress_rate; b.prog_n += 1; }}
+    byModel[key] = b;
+  }});
+  const mrows = Object.values(byModel).map(b =>
+    '<tr><td class="model-cell">' + esc(b.model) + '</td>'
+    + '<td>' + esc(b.backend) + '</td>'
+    + '<td class="num">' + num(b.n) + '</td>'
+    + '<td class="num">' + pct(b.prog_n ? b.prog / b.prog_n : null) + '</td>'
+    + '<td class="num">' + num(b.turned) + '</td>'
+    + '<td class="num">' + (b.cost_known ? money(b.cost, true) : dash(null)) + '</td>'
+    + '</tr>').join("");
+  if (mrows) {{
+    html += panel("Aggregates by model",
+      "all runs, clean or not, so the view is honest about every attempt",
+      '<table><thead><tr><th>Model</th><th>Provider</th>'
+      + '<th class="num">Runs</th><th class="num">Mean progress</th>'
+      + '<th class="num">Turns</th><th class="num">Cost</th></tr></thead>'
+      + '<tbody>' + mrows + '</tbody></table>', {{ tight: true }});
+  }}
+
   v.innerHTML = html;
 }};
 
@@ -498,6 +529,12 @@ RENDER.providers = async function (v) {{
           body: JSON.stringify({{ provider: b.dataset.p }}) }});
         toast("adopted " + r.n_written + " model(s) into your overlay", "good");
       }} catch (e) {{ toast(e.message, "bad"); }}
+    }} else if (act === "use-model") {{
+      // From a live probe result: carry both the model id and its provider
+      // over to Launch so nothing has to be re-picked by hand.
+      LAUNCH.defaultModel = b.dataset.m;
+      LAUNCH.defaultProvider = b.dataset.p;
+      show("launch");
     }}
   }});
 }};
@@ -684,6 +721,13 @@ RENDER.launch = async function (v) {{
     + (p.name === LAUNCH.defaultProvider ? " selected" : "") + '>'
     + esc(p.name) + (p.has_key ? "" : "  (no key)") + '</option>').join("");
 
+  // Every known model, keyed by id, so Launch can auto-link provider<-model.
+  const modelById = {{}};
+  (reg.models || []).forEach(m => {{ modelById[m.id] = m; }});
+  const modelOpts = (reg.models || []).map(m =>
+    '<option value="' + esc(m.id) + '">' + esc(m.id)
+    + (m.provider ? " \\u00b7 " + esc(m.provider) : "") + '</option>').join("");
+
   const dsOpts = (runs.datasets || []).map(d =>
     '<option value="' + esc(d.path) + '">' + esc(d.name) + ' \\u2014 '
     + d.n + ' mazes</option>').join("")
@@ -696,10 +740,13 @@ RENDER.launch = async function (v) {{
   html += panel("Run configuration", "",
     '<div class="grid2">'
     + '<label class="f"><span class="l">Provider</span>'
-    + '<select id="l-backend">' + provOpts + '</select></label>'
+    + '<select id="l-backend">' + provOpts + '</select>'
+    + '<span class="h">Set automatically when you pick a known model below.</span></label>'
     + '<label class="f"><span class="l">Model id</span>'
-    + '<input id="l-model" class="mono" value="' + esc(LAUNCH.defaultModel) + '" '
-    + 'placeholder="e.g. intern-s1-pro"></label>'
+    + '<input id="l-model" class="mono" list="l-model-list" value="'
+    + esc(LAUNCH.defaultModel) + '" placeholder="type or pick, e.g. intern-s1-pro">'
+    + '<datalist id="l-model-list">' + modelOpts + '</datalist>'
+    + '<span class="h" id="l-model-hint"></span></label>'
     + '<label class="f"><span class="l">Dataset</span>'
     + '<select id="l-dataset">' + dsOpts + '</select></label>'
     + '<label class="f"><span class="l">Mode</span>'
@@ -737,6 +784,31 @@ RENDER.launch = async function (v) {{
     + 'it moved closer to an exit. No judge and no rubric are involved in the score.');
 
   v.innerHTML = html;
+
+  // Picking/typing a known model auto-links its provider and shows what the
+  // table knows about it, so the form never sends a pairing the registry
+  // contradicts.
+  const syncModel = () => {{
+    const id = $("#l-model").value.trim();
+    const m = modelById[id];
+    const hint = $("#l-model-hint");
+    if (!m) {{
+      hint.textContent = "not in the local table \\u2014 limits unknown, cost "
+        + "will be reported as unmeasured";
+      return;
+    }}
+    if (m.provider) $("#l-backend").value = m.provider;
+    const ctx = m.context_window ? Number(m.context_window).toLocaleString() : "unknown";
+    const caps = (m.capabilities && m.capabilities.length)
+      ? m.capabilities.join(", ") : (m.capabilities === null ? "unchecked" : "text only");
+    hint.innerHTML = 'known: <b>' + esc(m.id) + '</b>'
+      + ' &middot; context <b>' + esc(ctx) + '</b> &middot; '
+      + '<b>' + esc(caps) + '</b>'
+      + (m.price_known ? "" : ' &middot; price unknown (cost shown as unmeasured)');
+  }};
+  $("#l-model").addEventListener("input", syncModel);
+  $("#l-model").addEventListener("change", syncModel);
+  syncModel();
 
   $("#l-go").addEventListener("click", async () => {{
     const body = {{
@@ -889,13 +961,42 @@ RENDER.results = async function (v) {{
 
 // ---- LOGS ------------------------------------------------------------------
 
+// A log tail is raw process output. Pull out the one line a human wants:
+// did it succeed, and if not, what is the fix. Raw text stays visible below.
+function interpretLog(lines) {{
+  const t = (lines || []).join("\\n").toLowerCase();
+  if (!t) return null;
+  if (t.includes("no svg->png rasteriser"))
+    return {{ kind: "err", text: "No rasteriser. Install one into this Python: "
+      + "pip install cairosvg, or pip install playwright && playwright install chromium. "
+      + "Text-only backends do not need this." }};
+  if (t.includes("authentication") || t.includes("401") || t.includes("unauthorized"))
+    return {{ kind: "err", text: "The provider rejected the API key. Check it in "
+      + "configs/.env (or export NAME_API_KEY) and re-run." }};
+  if (t.includes("rate limit") || t.includes("429"))
+    return {{ kind: "warn", text: "Provider rate-limited the requests. Give it a "
+      + "moment, or lower the episode count." }};
+  if (t.includes("context") && (t.includes("exceed") || t.includes("too long")
+      || t.includes("maximum")))
+    return {{ kind: "warn", text: "Context limit reached mid-episode -- that turn is "
+      + "recorded as an error, not scored. Longer-context models or shorter "
+      + "episodes avoid this." }};
+  if (t.includes("status : success") || t.includes('"status": "success"'))
+    return {{ kind: "ok", text: "Finished successfully." }};
+  if (t.includes("timed out") || t.includes("timeout"))
+    return {{ kind: "warn", text: "A call timed out (per-action timeout). If it "
+      + "happens often, the model or network is too slow for the timeout set." }};
+  return null;
+}}
+
 RENDER.logs = async function (v) {{
   const runs = await api("/api/runs");
   const jobs = await api("/api/jobs");
 
   let html = '<h1>Logs</h1>'
     + '<div class="dim" style="margin:4px 0 16px">Live process output. '
-    + 'A running job is polled while this tab is open; nothing is written to disk.</div>';
+    + 'A running job is polled while this tab is open; nothing is written to disk. '
+    + 'The first line under each job is a plain summary of the raw output below it.</div>';
 
   if (jobs.jobs && jobs.jobs.length) {{
     html += panel("Running now", jobs.jobs.length + " process(es)",
@@ -907,6 +1008,12 @@ RENDER.logs = async function (v) {{
         + esc(j.started_iso) + '</span>'
         + '<button class="lnk danger" data-act="kill" data-j="' + esc(j.job_id) + '">stop</button>'
         + '</div>'
+        + (function () {{
+            const i = interpretLog(j.tail);
+            if (i) return '<div class="note ' + i.kind + '" style="margin:8px 0 6px">'
+              + esc(i.text) + '</div>';
+            return "";
+          }})()
         + '<pre class="log" id="job-' + esc(j.job_id) + '">'
         + esc((j.tail || []).join("\\n") || "(no output yet)") + '</pre></div>').join(""));
   }} else {{
@@ -1119,6 +1226,10 @@ RENDER.replays = async function (v) {{
     if (!turns.length) {{ $("#rp-stage").innerHTML = '<div class="empty">No turns.</div>'; return; }}
     const lats = turns.map(t => t.latency_s || 0);
     const maxLat = Math.max.apply(null, lats) || 1;
+    // Filmstrip: one thumbnail per turn, click scrolls to that turn card.
+    const strip = turns.filter(t => t.frame).map((t, i) =>
+      '<img src="' + esc(t.frame) + '" alt="turn ' + esc(t.turn) + '" title="turn '
+      + esc(t.turn) + '" class="strip" data-jump="' + i + '">').join("");
     const cards = turns.map(t => {{
       const badge = (t.progressed === true ? "ok"
         : t.progressed === false ? "bad"
@@ -1160,21 +1271,40 @@ RENDER.replays = async function (v) {{
       + 'style="height:' + Math.max(4, Math.round((t.latency_s||0)/maxLat*40)) + 'px;width:7px;'
       + 'background:var(--blue);border-radius:2px"></div>').join("");
     $("#rp-stage").innerHTML = '<div class="tiny faint" style="margin-bottom:4px">'
-      + turns.length + ' turns &middot; vision: ' + (d.is_vision ? "yes" : "no") + '</div>'
+      + turns.length + ' turns &middot; vision: ' + (d.is_vision ? "yes" : "no")
+      + (d.is_vision && !strip ? ' &middot; <b>no frames recorded</b> -- the run had '
+        + 'no rasteriser or the pool is empty; add one to see images'
+        : '') + '</div>'
+      + (strip ? '<div class="striprow">' + strip + '</div>' : '')
       + '<div style="display:flex;align-items:flex-end;gap:3px;height:44px;margin-bottom:2px">'
       + bars + '</div>' + cards;
+    $$(".strip", $("#rp-stage")).forEach((img, i) =>
+      img.addEventListener("click", () => {{
+        const cardsEl = $$(".turn", $("#rp-stage"));
+        if (cardsEl[i]) cardsEl[i].scrollIntoView({{ behavior: "smooth", block: "start" }});
+      }}));
   }}
 
   if (sel) await loadEpisodes(sel);
   $("#rp-run").addEventListener("change", async e => {{
     await loadEpisodes(e.target.value); $("#rp-stage").innerHTML = "";
+    AutoPlay(e.target.value);
   }});
+  async function AutoPlay(runId) {{
+    const d = await api("/api/run/" + encodeURIComponent(runId));
+    const eps = d.episodes || [];
+    if (eps.length) {{
+      const first = $("#rp-ep-list").querySelector("button[data-ep='" + eps[0] + "']");
+      if (first) first.click();
+    }}
+  }}
   $("#rp-ep-list").addEventListener("click", async e => {{
     const b = e.target.closest("button[data-ep]"); if (!b) return;
     $("#rp-stage").innerHTML = '<div class="empty"><span class="spin"></span> loading</div>';
     try {{ await loadTurns($("#rp-run").value, b.dataset.ep); }}
     catch (er) {{ $("#rp-stage").innerHTML = '<div class="note err">' + esc(er.message) + '</div>'; }}
   }});
+  if (sel) AutoPlay(sel);
 }};
 
 RENDER.storyboard = async function (v) {{
