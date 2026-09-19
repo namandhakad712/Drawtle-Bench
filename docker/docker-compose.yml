@@ -52,8 +52,8 @@ services:
       # inferring it from a Dockerfile that happens to exist in the repo.
       - DRAWTLE_IN_SANDBOX=1
     volumes:
-      - ./results:/bench/results
-      - ./configs:/bench/configs
+      - ../results:/bench/results
+      - ../configs:/bench/configs
     networks:
       - bench-egress
     # Mock backend: needs no network. Verifies the image, the volumes, the
