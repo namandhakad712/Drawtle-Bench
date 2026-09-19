@@ -159,8 +159,12 @@ def main():
         check("GET /api/registry", st == 200 and reg["providers"], str(st))
         check("registry lists 22 providers", len(reg["providers"]) == 22,
               str(len(reg["providers"])))
-        check("registry lists 90 models", len(reg["models"]) == 90,
-              str(len(reg["models"])))
+        # The shipped table has 90 models; the overlay may ADD more (the user's
+        # own custom entries are legitimate edits), so any count >= 90 is a
+        # healthy registry. An exact-equality assertion here would fail for
+        # every user who has ever added a model through the dashboard.
+        check("registry lists at least the shipped 90 models",
+              len(reg["models"]) >= 90, str(len(reg["models"])))
         nocap = [m for m in reg["models"] if m["capabilities"] is None]
         emptycap = [m for m in reg["models"] if m["capabilities"] == []]
         check("an unchecked model reports null, not []",
@@ -175,7 +179,7 @@ def main():
               f"text-only', which must be a deliberate claim, never a default")
         check("some models are declared frame-capable",
               sum(1 for m in reg["models"]
-                  if m["capabilities"] and "image_in" in m["capabilities"]) == 25)
+                  if m["capabilities"] and "image_in" in m["capabilities"]) >= 25)
 
         st, ov = req("/api/overlay")
         check("GET /api/overlay", st == 200 and "path" in ov, str(st))

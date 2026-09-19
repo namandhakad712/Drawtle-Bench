@@ -250,13 +250,58 @@ function setPills(sys, runs) {{
 
 let VIEW = "overview";
 const RENDER = {{}};
+let CURRENT_MODAL = null;
+
+function closeModal() {{
+  if (CURRENT_MODAL) {{
+    CURRENT_MODAL.remove();
+    CURRENT_MODAL = null;
+  }}
+}}
+function onDocKeydown(e) {{
+  if (e.key === "Escape" && CURRENT_MODAL) {{
+    closeModal();
+  }}
+}}
+document.addEventListener("keydown", onDocKeydown);
+
+async function api(path, opts) {{
+  const r = await fetch(path, opts || {{}});
+  let j = null;
+  try {{ j = await r.json(); }} catch (e) {{ j = {{error: "server returned non-JSON"}}; }}
+  if (!r.ok) {{
+    const e = new Error((j && (j.error || j.detail)) || ("HTTP " + r.status));
+    e.body = j;
+    throw e;
+  }}
+  return j;
+}}
+
+async function apiWithRetry(path, opts, attempts) {{
+  let last;
+  for (let i = 0; i < (attempts || 2); i++) {{
+    try {{
+      return await api(path, opts);
+    }} catch (e) {{
+      last = e;
+      await new Promise(r => setTimeout(r, 250));
+    }}
+  }}
+  throw last;
+}}
 
 function show(name) {{
   VIEW = name;
   $$("nav.tabs button").forEach(b =>
     b.setAttribute("aria-selected", String(b.dataset.view === name)));
-  const v = $("#view");
+  closeModal();
+  const old = $("#view");
+  if (!old) return;
+  const v = document.createElement("div");
+  v.id = "view";
+  v.className = old.className;
   v.innerHTML = '<div class="empty"><span class="spin"></span> loading</div>';
+  old.replaceWith(v);
   (RENDER[name] || RENDER.overview)(v).catch(e => {{
     v.innerHTML = '<div class="note err"><b>Could not render this view.</b><br>'
       + esc(e.message)
@@ -322,11 +367,59 @@ function panel(title, sub, body, opts) {{
     + '<div class="body' + (opts.tight ? " tight" : "") + '">' + body + '</div></section>';
 }}
 
+// ---- LEADERBOARD BAR CHART -------------------------------------------------
+// The ranked table is a wall of numbers; this is the shape of the same data.
+// One horizontal bar per model, sized by turn-level progress, with the 95% CI
+// drawn as a shaded band so a wide-interval result cannot be read as a precise
+// one. Unknown score (no progress_rate) renders as a hatched bar: the model
+// ran, but nothing was measured -- that is not zero.
+function lbChart(rows) {{
+  const body = rows.map((r, i) => {{
+    const rate = r.progress_rate;
+    const p = (rate === null || rate === undefined) ? null : Math.max(0, Math.min(1, rate));
+    const pctv = (p === null) ? "&ndash;" : (p * 100).toFixed(1) + "%";
+    const cls = p === null ? "unk" : (p >= 0.7 ? "hi" : (p >= 0.3 ? "mid" : "lo"));
+    const w = (p === null) ? 100 : Math.max(6, p * 100);
+    const whisk = (r.ci95 && r.ci95[0] !== null
+      && r.ci95[0] !== undefined && r.ci95[1] !== null && r.ci95[1] !== undefined);
+    // A CI band spans the interval rather than marking only its ends: a band
+    // reads as "somewhere in here", two ticks read as "exactly these values".
+    const lo = whisk ? Math.max(0, r.ci95[0]) * 100 : 0;
+    const hi = whisk ? Math.min(1, r.ci95[1]) * 100 : 0;
+    const bandHtml = whisk
+      ? '<div class="lb-band" style="left:' + lo + '%;width:'
+        + Math.max(1, hi - lo) + '%"></div>'
+      : "";
+    const cost = (r.total_cost_usd === null || r.total_cost_usd === undefined
+      || r.total_cost_usd === 0)
+      ? (r.total_cost_usd === 0 ? "$0.000" : "&ndash;")
+      : "$" + Number(r.total_cost_usd).toFixed(3);
+    const rid = String(r.run_id || r.file || "").replace(/\\.summary\\.json$/, "");
+    const eps = (r.n_episodes !== null && r.n_episodes !== undefined)
+      ? num(r.n_episodes) + " ep" : "&ndash; ep";
+    return '<div class="lb-row">'
+      + '<div class="lb-rank">' + (i + 1) + '</div>'
+      + '<div class="lb-model"><a href="/run/' + esc(rid) + '">'
+      + esc(r.model) + '</a><span class="p">' + esc(r.backend || "") + ' \\u00b7 '
+      + eps + ' \\u00b7 ' + cost + '</span></div>'
+      + '<div class="lb-track">'
+      + '<div class="lb-grid"><i style="left:25%"></i><i style="left:50%"></i>'
+      + '<i style="left:75%"></i></div>'
+      + bandHtml
+      + '<div class="lb-fill ' + cls + '" style="width:' + w + '%"></div>'
+      + '</div>'
+      + '<div class="lb-val">' + pctv
+      + (whisk ? '<small>' + ci(r.ci95) + '</small>' : '') + '</div>'
+      + '</div>';
+  }}).join("");
+  return '<div class="lb">' + body + '</div>';
+}}
+
 // ---- OVERVIEW --------------------------------------------------------------
 
 RENDER.overview = async function (v) {{
   const [sys, runs, ov] = await Promise.all([
-    api("/api/system"), api("/api/runs"), api("/api/overlay")
+    apiWithRetry("/api/system"), apiWithRetry("/api/runs"), apiWithRetry("/api/overlay")
   ]);
   setPills(sys, runs);
   const lb = await api("/api/leaderboard");
@@ -360,23 +453,26 @@ RENDER.overview = async function (v) {{
       + '--model mock --mode optimal --dataset results/dataset.json</code> to '
       + 'produce one.</span></div>');
   }} else {{
-    const rows = lb.rows.map((r, i) =>
-      '<tr><td class="rank">' + (i + 1) + '</td>'
-      + '<td class="model-cell"><a href="/run/' + esc(r.file.replace(/\\.summary\\.json$/, ""))
-      + '">' + esc(r.model) + '</a></td>'
-      + '<td>' + esc(r.backend) + '</td>'
-      + '<td class="num">' + pct(r.progress_rate) + '</td>'
-      + '<td class="num tiny">' + ci(r.ci95) + '</td>'
-      + '<td class="num">' + num(r.n_episodes) + '</td>'
-      + '<td class="num">' + ((r.total_cost_usd === null || r.total_cost_usd === undefined)
-          ? dash(null) : "$" + Number(r.total_cost_usd).toFixed(3)) + '</td></tr>').join("");
     html += panel("Leaderboard",
       lb.rows.length + " clean run(s)"
       + (lb.n_excluded ? " \\u00b7 " + lb.n_excluded + " excluded" : ""),
-      '<table><thead><tr><th>#</th><th>Model</th><th>Provider</th>'
-      + '<th class="num">Progress</th><th class="num">CI95</th>'
-      + '<th class="num">Episodes</th><th class="num">Cost</th></tr></thead>'
-      + '<tbody>' + rows + '</tbody></table>', {{ tight: true }});
+      lbChart(lb.rows)
+      + '<div class="lb-axis"><span></span><span></span>'
+      + '<span class="ticks">'
+      + '<span style="left:0%">0%</span>'
+      + '<span style="left:25%">25%</span>'
+      + '<span style="left:50%">50%</span>'
+      + '<span style="left:75%">75%</span>'
+      + '<span style="left:100%">100%</span>'
+      + '</span><span></span></div>'
+      + '<div class="lb-legend">'
+      + '<span><i style="background:var(--green)"></i> &ge; 70%</span>'
+      + '<span><i style="background:#d19b1a"></i> 30&ndash;70%</span>'
+      + '<span><i style="background:var(--red)"></i> &lt; 30%</span>'
+      + '<span><i style="background:rgba(37,89,176,.28)"></i> 95% CI band</span>'
+      + '<span class="tiny faint">bar = turn-level progress (mean of per-turn '
+      + 'progressed); band = 95% CI across episodes</span></div>',
+      {{ tight: true }});
     html += note(NOTE.ranked);
   }}
 
@@ -425,8 +521,8 @@ RENDER.overview = async function (v) {{
 let PROBE = {{}};   // provider -> last probe result in this session
 
 RENDER.providers = async function (v) {{
-  const reg = await api("/api/registry");
-  const ov = await api("/api/overlay");
+  const reg = await apiWithRetry("/api/registry");
+  const ov = await apiWithRetry("/api/overlay");
 
   const rows = reg.providers.map(p => {{
     const pr = PROBE[p.name];
@@ -434,11 +530,17 @@ RENDER.providers = async function (v) {{
     if (!pr) {{
       live = '<span class="faint tiny">not probed</span>';
     }} else if (pr.pending) {{
-      live = '<span class="tiny">' + '<span class="spin"></span> probing</span>';
+      live = '<span class="tiny">' + '<span class="spin"></span> '
+        + (pr.test_only ? 'testing connection' : 'probing') + '</span>';
     }} else if (pr.ok) {{
-      live = '<span class="tag ok">' + pr.n + ' live</span>';
+      if (pr.test_only) {{
+        live = '<span class="tag ok">connected</span>';
+      }} else {{
+        live = '<span class="tag ok">' + pr.n + ' live</span>';
+      }}
     }} else {{
-      live = '<span class="tag err" title="' + esc(pr.error) + '">unreachable</span>';
+      live = '<span class="tag err" title="' + esc(pr.error) + '">'
+        + (pr.test_only ? 'connection failed' : 'unreachable') + '</span>';
     }}
     const keyc = p.has_key
       ? '<span class="tag ok" title="a key was found for this provider">key</span>'
@@ -455,6 +557,7 @@ RENDER.providers = async function (v) {{
       + '<td>' + keyc + '</td>'
       + '<td>' + live + '</td>'
       + '<td class="right nowrap">'
+        + '<button class="lnk" data-act="test-conn" data-p="' + esc(p.name) + '">Test connection</button>'
         + '<button class="lnk" data-act="probe" data-p="' + esc(p.name) + '">probe</button>'
         + '<button class="lnk" data-act="edit-provider" data-p="' + esc(p.name) + '">edit</button>'
         + (p.builtin ? '' : '<button class="lnk danger" data-act="del-provider" data-p="'
@@ -489,7 +592,18 @@ RENDER.providers = async function (v) {{
     const b = ev.target.closest("button[data-act]");
     if (!b) return;
     const act = b.dataset.act;
-    if (act === "probe") {{
+    if (act === "test-conn") {{
+      PROBE[b.dataset.p] = {{ pending: true, test_only: true }};
+      RENDER.providers(v);
+      try {{
+        const r = await api("/api/probe?provider=" + encodeURIComponent(b.dataset.p)
+          + "&test_only=1");
+        PROBE[b.dataset.p] = {{ ...r, test_only: true }};
+      }} catch (e) {{
+        PROBE[b.dataset.p] = {{ ok: false, error: e.message, test_only: true }};
+      }}
+      RENDER.providers(v);
+    }} else if (act === "probe") {{
       PROBE[b.dataset.p] = {{ pending: true }};
       RENDER.providers(v);
       try {{
@@ -529,6 +643,20 @@ RENDER.providers = async function (v) {{
           body: JSON.stringify({{ provider: b.dataset.p }}) }});
         toast("adopted " + r.n_written + " model(s) into your overlay", "good");
       }} catch (e) {{ toast(e.message, "bad"); }}
+    }} else if (act === "adopt-sel") {{
+      const ids = Array.from($$("input[data-pick='" + esc(b.dataset.p) + "']"))
+        .filter(cb => cb.checked)
+        .map(cb => cb.dataset.id);
+      if (!ids.length) {{
+        toast("tick at least one model first", "bad");
+        return;
+      }}
+      try {{
+        const r = await api("/api/adopt", {{ method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{ provider: b.dataset.p, ids: ids }}) }});
+        toast("adopted " + r.n_written + " model(s) into your overlay", "good");
+      }} catch (e) {{ toast(e.message, "bad"); }}
     }} else if (act === "use-model") {{
       // From a live probe result: carry both the model id and its provider
       // over to Launch so nothing has to be re-picked by hand.
@@ -545,22 +673,29 @@ function renderProbeDetail() {{
   const keys = Object.keys(PROBE).filter(k => PROBE[k] && PROBE[k].ok && PROBE[k].models);
   if (!keys.length) return;
   let h = '<section class="panel"><div class="head"><div class="t">'
-    + 'Live discovery results</div><div class="sub">correct as of the moment you '
-    + 'clicked probe</div></div><div class="body tight">';
+    + 'Fetched models</div><div class="sub">tick the ones you want in your table</div>'
+    + '</div><div class="body tight">';
   keys.forEach(p => {{
     const pr = PROBE[p];
-    h += '<details open><summary><b>' + esc(p) + '</b>'
+    h += '<div style="margin-bottom:14px">'
+      + '<div class="row" style="margin-bottom:8px">'
+      + '<b>' + esc(p) + '</b>'
       + '<span class="tag ok">' + pr.n + ' models</span>'
       + '<span class="tiny dim" style="margin-left:auto">'
       + esc(pr.endpoint) + ' \\u00b7 ' + pr.elapsed_ms + ' ms'
-      + ' \\u00b7 key via ' + esc(pr.key_source || "none") + '</span></summary>'
-      + '<div class="dbody"><div class="row" style="margin:9px 0">'
-      + '<button class="lnk" data-act="adopt" data-p="' + esc(p) + '">'
-      + 'adopt all into my overlay</button>'
-      + '<span class="tiny dim">Writes only fields the provider actually '
-      + 'published. Anything it stayed silent about stays unknown.</span></div>'
-      + '<table><thead><tr><th>Model</th><th>Context window</th><th>Capabilities</th>'
-      + '<th></th></tr></thead><tbody>';
+      + ' \\u00b7 key via ' + esc(pr.key_source || "none") + '</span>'
+      + (pr.test_only ? ' <span class="tag info">connection ok</span>' : '')
+      + '</div>'
+      + '<div class="row" style="margin:6px 0 10px">'
+      + '<button class="btn" data-act="adopt" data-p="' + esc(p) + '">'
+      + 'Add all to my table</button>'
+      + '<button class="btn primary" data-act="adopt-sel" data-p="' + esc(p) + '">'
+      + 'Add selected</button>'
+      + '<span class="tiny dim" style="margin-left:10px">Only the ticked models '
+      + 'are written. Fields the provider stayed silent about stay unknown.</span>'
+      + '</div>'
+      + '<table><thead><tr><th class="sel-col"></th><th>Model</th>'
+      + '<th>Context window</th><th>Capabilities</th><th class="right">Action</th></tr></thead><tbody>';
     pr.models.forEach(m => {{
       const ctx = m.context_window
         ? Number(m.context_window).toLocaleString()
@@ -570,13 +705,16 @@ function renderProbeDetail() {{
               : "not published by the provider; this is our local table entry")
           + '">' + (m.context_source === "api" ? "api" : "local") + '</span>'
         : dash(null);
-      h += '<tr><td class="model-cell">' + esc(m.id)
+      h += '<tr><td class="sel-col"><input type="checkbox" data-pick="'
+        + esc(p) + '" data-id="' + esc(m.id) + '"></td>'
+        + '<td class="model-cell">' + esc(m.id)
         + (m.in_registry ? '' : ' <span class="tag unk" title="not in the local table">new</span>')
         + '</td><td>' + ctx + '</td><td>' + capTags(m.capabilities) + '</td>'
-        + '<td class="right"><button class="lnk" data-act="use-model" data-p="'
+        + '<td class="right nowrap">'
+        + '<button class="lnk" data-act="use-model" data-p="'
         + esc(p) + '" data-m="' + esc(m.id) + '">use this</button></td></tr>';
     }});
-    h += '</tbody></table></div></details>';
+    h += '</tbody></table></div>';
   }});
   h += '</div></section>';
   host.innerHTML = h;
@@ -594,12 +732,13 @@ const capTags = capTagsJS;
 // ---- MODELS ----------------------------------------------------------------
 
 RENDER.models = async function (v) {{
-  const reg = await api("/api/registry");
+  const reg = await apiWithRetry("/api/registry");
   const all = reg.models;
   let filter = "";
   let onlyFrames = false;
+  const sel = new Set();   // ids ticked for a batch action
 
-  function draw() {{
+  function visible() {{
     let list = all;
     if (filter) {{
       const f = filter.toLowerCase();
@@ -607,6 +746,11 @@ RENDER.models = async function (v) {{
         .toLowerCase().includes(f));
     }}
     if (onlyFrames) list = list.filter(m => m.capabilities && m.capabilities.indexOf("image_in") >= 0);
+    return list;
+  }}
+
+  function draw() {{
+    const list = visible();
 
     const rows = list.map(m => {{
       let f;
@@ -623,7 +767,11 @@ RENDER.models = async function (v) {{
             : "$" + m.price_in + " / $" + m.price_out) + '</span>'
         : '<span class="faint tiny" title="no price on record -- cost for a run '
           + 'on this model is reported as unknown, never as zero">unknown</span>';
-      return '<tr><td class="model-cell">' + esc(m.id)
+      const checked = sel.has(m.id) ? " checked" : "";
+      return '<tr class="' + (sel.has(m.id) ? "sel" : "") + '">'
+        + '<td class="sel-col"><input type="checkbox" data-sel="'
+          + esc(m.id) + '"' + checked + '></td>'
+        + '<td class="model-cell">' + esc(m.id)
         + (m.updated ? ' <span class="tag info" title="edited in your overlay">edited</span>' : '')
         + (m.display_name && m.display_name !== m.id
             ? '<div class="tiny dim">' + esc(m.display_name) + '</div>' : '')
@@ -639,13 +787,25 @@ RENDER.models = async function (v) {{
         + '<button class="lnk" data-act="edit-model" data-m="' + esc(m.id) + '">edit</button>'
         + '<button class="lnk danger" data-act="del-model" data-m="' + esc(m.id) + '">remove</button>'
         + '</td></tr>';
-    }}).join("") || '<tr><td colspan="7" class="empty">No model matches.</td></tr>';
+    }}).join("") || '<tr><td colspan="8" class="empty">No model matches.</td></tr>';
 
     $("#model-table").innerHTML =
-      '<table><thead><tr><th>Model</th><th>Provider</th><th class="num">Context</th>'
+      '<table><thead><tr><th class="sel-col">'
+      + '<input type="checkbox" id="sel-all"'
+      + (list.length && list.every(m => sel.has(m.id)) ? " checked" : "") + '>'
+      + '</th><th>Model</th><th>Provider</th><th class="num">Context</th>'
       + '<th>Frame input</th><th>Capabilities</th><th>Price /1K</th><th></th></tr></thead>'
       + '<tbody>' + rows + '</tbody></table>';
     $("#model-count").textContent = list.length + " of " + all.length + " shown";
+
+    // Batch bar: appears only when something is ticked.
+    const n = sel.size;
+    $("#batchbar").style.display = n ? "" : "none";
+    if (n) {{
+      $("#batch-count").textContent = n + " selected";
+    }}
+    const any = list.some(m => sel.has(m.id));
+    $("#sel-all").checked = any && list.every(m => sel.has(m.id));
   }}
 
   const nFrame = all.filter(m => m.capabilities && m.capabilities.indexOf("image_in") >= 0).length;
@@ -666,10 +826,17 @@ RENDER.models = async function (v) {{
            s: "capabilities never recorded" }},
       ])
     + '<div class="toolbar" style="margin-top:16px">'
-    + '<input id="model-filter" placeholder="filter by id or provider" style="max-width:280px">'
+    + '<input id="model-filter" placeholder="search id / provider / display name" style="max-width:300px">'
     + '<label class="check" style="margin:0"><input type="checkbox" id="only-frames">'
-    + ' only frame-capable</label>'
-    + '<button class="btn primary" data-act="new-model" style="margin-left:auto">Add a model</button>'
+    + ' frame-capable only</label>'
+    + '<button class="btn primary" data-act="new-model" style="margin-left:auto">+ Add a model</button>'
+    + '</div>'
+    + '<div class="batchbar" id="batchbar" style="display:none">'
+    + '<b id="batch-count"></b>'
+    + '<button class="btn" data-act="batch-use">add to launch</button>'
+    + '<button class="btn danger" data-act="batch-del">remove selected</button>'
+    + '<span class="spacer"></span>'
+    + '<button class="lnk" data-act="batch-clear">clear</button>'
     + '</div>';
 
   html += panel("Model table", '<span id="model-count"></span>',
@@ -680,6 +847,22 @@ RENDER.models = async function (v) {{
   draw();
   $("#model-filter").addEventListener("input", e => {{ filter = e.target.value; draw(); }});
   $("#only-frames").addEventListener("change", e => {{ onlyFrames = e.target.checked; draw(); }});
+
+  // Tick / untick -- delegated so re-renders keep working.
+  v.addEventListener("change", (ev) => {{
+    const s = ev.target.closest("input[data-sel]");
+    if (s) {{
+      if (s.checked) sel.add(s.dataset.sel); else sel.delete(s.dataset.sel);
+      draw();
+      return;
+    }}
+    if (ev.target.id === "sel-all") {{
+      const list = visible();
+      if (ev.target.checked) list.forEach(m => sel.add(m.id));
+      else list.forEach(m => sel.delete(m.id));
+      draw();
+    }}
+  }});
 
   v.addEventListener("click", async (ev) => {{
     const b = ev.target.closest("button[data-act]");
@@ -704,6 +887,36 @@ RENDER.models = async function (v) {{
       }} catch (e) {{ toast(e.message, "bad"); }}
     }} else if (act === "new-model") {{
       newModelForm();
+    }} else if (act === "batch-use") {{
+      const ids = Array.from(sel);
+      const first = all.find(m => m.id === ids[0]);
+      // Whichever provider the first selected model belongs to drives the
+      // launch form; the batch is a convenience, not a multi-run.
+      LAUNCH.defaultModel = ids[0];
+      LAUNCH.defaultProvider = (first && first.provider) || "";
+      toast("loading " + ids.length + " model(s) into launch \\u2014 uses '" +
+        (ids[0]) + "' as the model", "good");
+      show("launch");
+    }} else if (act === "batch-del") {{
+      const ids = Array.from(sel);
+      if (!confirm("Remove " + ids.length + " model(s) from your table?\\n\\n"
+        + "Tombs written to your overlay. The shipped registry file is not "
+        + "modified.")) return;
+      let ok = 0, bad = 0;
+      for (const id of ids) {{
+        try {{
+          await api("/api/model/delete", {{ method: "POST",
+            headers: {{"Content-Type": "application/json"}},
+            body: JSON.stringify({{ id: id }}) }});
+          ok++;
+        }} catch (e) {{ bad++; }}
+      }}
+      toast(ok + " removed" + (bad ? ", " + bad + " failed" : ""),
+        bad ? "bad" : "good");
+      RENDER.models(v);
+    }} else if (act === "batch-clear") {{
+      sel.clear();
+      draw();
     }}
   }});
 }};
@@ -713,8 +926,8 @@ RENDER.models = async function (v) {{
 const LAUNCH = {{ defaultProvider: BOOT.default_provider || "", defaultModel: BOOT.default_model || "" }};
 
 RENDER.launch = async function (v) {{
-  const reg = await api("/api/registry");
-  const runs = await api("/api/runs");
+  const reg = await apiWithRetry("/api/registry");
+  const runs = await apiWithRetry("/api/runs");
 
   const provOpts = reg.providers.map(p =>
     '<option value="' + esc(p.name) + '"'
@@ -769,8 +982,10 @@ RENDER.launch = async function (v) {{
     + '<span class="h">Only sent for models known to accept it; a model that does '
     + 'not gets nothing rather than a silently clamped value.</span></label>'
     + '</div>'
-    + '<label class="check"><input type="checkbox" id="l-frames">'
-    + ' cache rendered frames to <code>results/frames/</code></label>'
+    + '<label class="check"><input type="checkbox" id="l-frames" checked>'
+    + ' cache rendered frames to <code>results/frames/</code>'
+    + ' <span class="tiny faint">required for vision models -- a run without '
+    + 'frames sends text only and measures nothing</span></label>'
     + '<label class="check"><input type="checkbox" id="l-nav">'
     + ' navigation mode &mdash; the turtle moves toward an exit</label>'
     + '<div class="row" style="margin-top:14px">'
@@ -879,12 +1094,16 @@ RENDER.launch = async function (v) {{
 // ---- RESULTS ---------------------------------------------------------------
 
 RENDER.results = async function (v) {{
-  const runs = await api("/api/runs");
+  const runs = await apiWithRetry("/api/runs");
 
   let html = '<h1>Results</h1>'
     + '<div class="toolbar">'
     + '<button class="btn" data-act="exp-csv">Export CSV</button>'
     + '<button class="btn" data-act="exp-json">Export JSON</button>'
+    + (bad.length
+        ? '<button class="btn danger" data-act="del-incomplete">Delete '
+          + bad.length + ' incomplete run(s)</button>'
+        : '')
     + '<span class="tiny dim" style="margin-left:auto">Exports cover every run, '
     + 'clean and excluded, exactly as listed.</span></div>'
     + '<div class="dim" style="margin:4px 0 16px">'
@@ -931,9 +1150,10 @@ RENDER.results = async function (v) {{
       + '<td>' + tag(r.status, "err") + '</td>'
       + '<td class="tiny">' + esc((r.status_note || "").slice(0, 110)) + '</td>'
       + '<td class="num tiny">' + (r.n_turns === null ? dash(null) : r.n_turns) + '</td>'
-      + '<td class="right nowrap"><button class="lnk" data-act="exp-run" data-run="'
-      + esc(r.run_id) + '">export</button></td>'
-      + '</tr>').join("");
+      + '<td class="right nowrap">'
+      + '<button class="lnk" data-act="exp-run" data-run="' + esc(r.run_id) + '">export</button>'
+      + ' <button class="lnk danger" data-act="del-run" data-run="' + esc(r.run_id) + '">delete</button>'
+      + '</td></tr>').join("");
     html += panel("Not results (" + bad.length + ")",
       "excluded from every ranking",
       '<table><thead><tr><th>Run</th><th>Model</th><th>Status</th>'
@@ -955,6 +1175,61 @@ RENDER.results = async function (v) {{
         downloadBlob(b.dataset.run + ".json", JSON.stringify(d, null, 2), "application/json");
         toast("exported " + b.dataset.run, "good");
       }} catch (e) {{ toast(e.message, "bad"); }}
+    }} else if (act === "del-run") {{
+      const run_id = b.dataset.run;
+      if (!confirm("Delete run " + run_id + "?\\n\\nThis permanently removes "
+        + "its log, summary, status record, checkpoint, report and transcript "
+        + "from disk. It cannot be undone, and the run's numbers are gone with "
+        + "it.")) return;
+      b.disabled = true;
+      const oldText = b.textContent;
+      b.textContent = "deleting\\u2026";
+      try {{
+        const r = await api("/api/run/delete", {{ method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{ run_id: run_id }}) }});
+        toast("deleted " + run_id + " ("
+          + ((r.deleted && r.deleted.removed) || []).length + " file(s))", "good");
+        RENDER.results(v);
+      }} catch (e) {{
+        b.disabled = false;
+        b.textContent = oldText;
+        const why = (e && e.body && (e.body.error || e.body.detail)) || e.message;
+        const hint = /still in progress/i.test(why)
+          ? "\\n\\nIt is still running -- stop it on the Logs tab first."
+          : /no files/i.test(why)
+            ? "\\n\\nThe run may already be gone; refreshing the list."
+            : "";
+        toast("Could not delete " + run_id + ": " + why + hint, "bad");
+        if (/no files|still in progress/i.test(why)) RENDER.results(v);
+      }}
+    }} else if (act === "del-incomplete") {{
+      const ids = bad.map(r => r.run_id);
+      if (!ids.length) {{ toast("nothing incomplete to delete", "bad"); return; }}
+      if (!confirm("Delete all " + ids.length + " run(s) that did not finish "
+        + "cleanly?\\n\\nThese are the runs listed under \\u201cNot results\\u201d "
+        + "-- interrupted, errored, or never summarised. Their files are removed "
+        + "from disk and cannot be recovered. Clean runs are untouched.")) return;
+      let ok = 0, skipped = 0;
+      const failed = [];
+      for (const id of ids) {{
+        try {{
+          await api("/api/run/delete", {{ method: "POST",
+            headers: {{"Content-Type": "application/json"}},
+            body: JSON.stringify({{ run_id: id }}) }});
+          ok++;
+        }} catch (e) {{
+          const why = (e && e.body && (e.body.error || e.body.detail))
+            || e.message;
+          if (/still in progress/i.test(why)) {{ skipped++; }}
+          else failed.push(id);
+        }}
+      }}
+      const msg = ok + " deleted"
+        + (skipped ? " \\u00b7 " + skipped + " skipped (still running)" : "")
+        + (failed.length ? " \\u00b7 " + failed.length + " failed" : "");
+      toast(msg, failed.length ? "bad" : "good");
+      RENDER.results(v);
     }}
   }});
 }};
@@ -990,22 +1265,99 @@ function interpretLog(lines) {{
 }}
 
 RENDER.logs = async function (v) {{
-  const runs = await api("/api/runs");
-  const jobs = await api("/api/jobs");
+  const runs = await apiWithRetry("/api/runs");
+  const jobs = await apiWithRetry("/api/jobs");
+
+  // Filter state survives the re-render that follows a stop, so a search in
+  // flight is not silently dropped on the refresh.
+  if (!window.__logState) window.__logState = {{ q: "", level: "all", follow: true }};
+  const LS = window.__logState;
+  const RAW = {{}};   // job_id -> raw lines, so filtering never truncates the source
+
+  function classify(line) {{
+    const t = (line || "").toLowerCase();
+    if (!t.trim()) return "blank";
+    if (/(^|\\b)(error|traceback|exception|failed|failure|critical|cannot|abort)(\\b|$)/.test(t))
+      return "err";
+    if (/(^|\\b)(warn|warning|timeout|timed out|rate limit|429|retry|deprecat)(\\b|$)/.test(t))
+      return "warn";
+    return "info";
+  }}
+
+  function filtered(jobId) {{
+    const lines = RAW[jobId] || [];
+    const q = (LS.q || "").trim().toLowerCase();
+    const out = [];
+    let nErr = 0, nWarn = 0;
+    for (const ln of lines) {{
+      const lv = classify(ln);
+      if (lv === "err") nErr++;
+      if (lv === "warn") nWarn++;
+      if (LS.level === "err" && lv !== "err") continue;
+      if (LS.level === "warn" && lv !== "warn" && lv !== "err") continue;
+      if (q && ln.toLowerCase().indexOf(q) < 0) continue;
+      out.push(ln);
+    }}
+    return {{ lines: out, nErr: nErr, nWarn: nWarn, total: lines.length }};
+  }}
+
+  function paint(jobId) {{
+    const el = $("#job-" + jobId);
+    if (!el) return;
+    const f = filtered(jobId);
+    const body = f.lines.length
+      ? f.lines.join("\\n")
+      : (RAW[jobId] && RAW[jobId].length
+          ? "(no lines match the current filter)"
+          : "(no output yet)");
+    el.textContent = body;
+    const badge = $("#jobcount-" + jobId);
+    if (badge) {{
+      badge.textContent = f.lines.length + " / " + f.total + " lines"
+        + (f.nErr ? " \\u00b7 " + f.nErr + " error" + (f.nErr === 1 ? "" : "s") : "")
+        + (f.nWarn ? " \\u00b7 " + f.nWarn + " warn" + (f.nWarn === 1 ? "" : "s") : "");
+    }}
+    if (LS.follow) {{
+      el.scrollTop = el.scrollHeight;
+    }}
+  }}
+
+  function paintAll() {{
+    Object.keys(RAW).forEach(paint);
+  }}
 
   let html = '<h1>Logs</h1>'
-    + '<div class="dim" style="margin:4px 0 16px">Live process output. '
-    + 'A running job is polled while this tab is open; nothing is written to disk. '
-    + 'The first line under each job is a plain summary of the raw output below it.</div>';
+    + '<div class="dim" style="margin:4px 0 16px">Live process output. A running job '
+    + 'is polled while this tab is open; the summary line above each log is the '
+    + 'one thing worth reading first.</div>';
 
   if (jobs.jobs && jobs.jobs.length) {{
     html += panel("Running now", jobs.jobs.length + " process(es)",
-      jobs.jobs.map(j => '<div style="margin-bottom:11px">'
+      '<div class="toolbar" style="margin:0 0 12px;flex-wrap:wrap">'
+      + '<input id="log-q" placeholder="search log text\\u2026" '
+        + 'style="max-width:260px;padding:6px 9px" value="' + esc(LS.q) + '">'
+      + '<div class="tabs2" style="margin:0;border:0" role="group">'
+      + '<button class="lnk" data-level="all" aria-selected="'
+        + (LS.level === "all") + '">all</button>'
+      + '<button class="lnk" data-level="err" aria-selected="'
+        + (LS.level === "err") + '">errors</button>'
+      + '<button class="lnk" data-level="warn" aria-selected="'
+        + (LS.level === "warn") + '">warnings</button>'
+      + '</div>'
+      + '<label class="check" style="margin:0"><input type="checkbox" id="log-follow"'
+        + (LS.follow ? " checked" : "") + '> follow tail</label>'
+      + '<span style="flex:1"></span>'
+      + '<button class="btn" id="log-copy">Copy visible</button>'
+      + '<button class="btn" id="log-clear">Clear filters</button>'
+      + '</div>'
+      + jobs.jobs.map(j => '<div style="margin-bottom:11px">'
         + '<div class="row"><b class="mono tiny">' + esc(j.run_id) + '</b>'
-        + tag(j.status, j.status === "running" ? "info" : (j.status === "success" ? "ok" : "err"))
+        + tag(j.status, j.status === "running" ? "info"
+            : (j.status === "success" ? "ok" : "err"))
         + '<span class="tiny dim">' + esc(j.backend) + " / " + esc(j.model) + '</span>'
-        + '<span class="tiny faint" style="margin-left:auto">started '
-        + esc(j.started_iso) + '</span>'
+        + '<span class="tiny faint" id="jobcount-' + esc(j.job_id) + '" '
+           + 'style="margin-left:auto"></span>'
+        + '<span class="tiny faint">started ' + esc(j.started_iso) + '</span>'
         + '<button class="lnk danger" data-act="kill" data-j="' + esc(j.job_id) + '">stop</button>'
         + '</div>'
         + (function () {{
@@ -1014,8 +1366,8 @@ RENDER.logs = async function (v) {{
               + esc(i.text) + '</div>';
             return "";
           }})()
-        + '<pre class="log" id="job-' + esc(j.job_id) + '">'
-        + esc((j.tail || []).join("\\n") || "(no output yet)") + '</pre></div>').join(""));
+        + '<pre class="log" id="job-' + esc(j.job_id) + '"></pre></div>').join(""),
+      {{ tight: false }});
   }} else {{
     html += panel("Running now", "", '<div class="empty">No run is in progress. '
       + 'Start one from the Launch tab.</div>');
@@ -1042,7 +1394,23 @@ RENDER.logs = async function (v) {{
 
   v.innerHTML = html;
 
+  // Seed the raw store, then paint once the DOM exists.
+  (jobs.jobs || []).forEach(j => {{ RAW[j.job_id] = (j.tail || []).slice(); }});
+  paintAll();
+
+  const qEl = $("#log-q");
+  if (qEl) {{
+    qEl.addEventListener("input", e => {{ LS.q = e.target.value; paintAll(); }});
+  }}
   v.addEventListener("click", async ev => {{
+    const lv = ev.target.closest("button[data-level]");
+    if (lv) {{
+      LS.level = lv.dataset.level;
+      $$("button[data-level]", v).forEach(b =>
+        b.setAttribute("aria-selected", String(b === lv)));
+      paintAll();
+      return;
+    }}
     const b = ev.target.closest("button[data-act=kill]");
     if (!b) return;
     if (!confirm("Stop this run?\\n\\nIt is recorded as interrupted, not as a "
@@ -1056,15 +1424,49 @@ RENDER.logs = async function (v) {{
     }} catch (e) {{ toast(e.message, "bad"); }}
   }});
 
+  const fEl = $("#log-follow");
+  if (fEl) fEl.addEventListener("change", e => {{ LS.follow = e.target.checked; }});
+  const cEl = $("#log-clear");
+  if (cEl) cEl.addEventListener("click", () => {{
+    LS.q = ""; LS.level = "all";
+    if (qEl) qEl.value = "";
+    $$("button[data-level]", v).forEach(b =>
+      b.setAttribute("aria-selected", String(b.dataset.level === "all")));
+    paintAll();
+    toast("log filters cleared", "good");
+  }});
+  const cpEl = $("#log-copy");
+  if (cpEl) cpEl.addEventListener("click", async () => {{
+    const parts = Object.keys(RAW).map(id => {{
+      const el = $("#job-" + id);
+      return el ? el.textContent : "";
+    }}).filter(Boolean);
+    const txt = parts.join("\\n---\\n");
+    try {{
+      if (navigator.clipboard && navigator.clipboard.writeText) {{
+        await navigator.clipboard.writeText(txt);
+      }} else {{
+        const ta = document.createElement("textarea");
+        ta.value = txt;
+        ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }}
+      toast("log copied to clipboard", "good");
+    }} catch (e) {{ toast("could not copy: " + e.message, "bad"); }}
+  }});
+
   if (jobs.jobs && jobs.jobs.length) {{
     if (window.__logTimer) clearInterval(window.__logTimer);
     window.__logTimer = setInterval(async () => {{
       if (VIEW !== "logs") {{ clearInterval(window.__logTimer); return; }}
       try {{
-        const j = await api("/api/jobs");
+        const j = await apiWithRetry("/api/jobs");
         (j.jobs || []).forEach(job => {{
-          const el = $("#job-" + job.job_id);
-          if (el) el.textContent = (job.tail || []).join("\\n") || "(no output yet)";
+          RAW[job.job_id] = (job.tail || []).slice();
+          paint(job.job_id);
         }});
         if (!(j.jobs || []).length) {{ clearInterval(window.__logTimer); RENDER.logs(v); }}
       }} catch (e) {{ /* keep polling; a transient error is not worth a toast */ }}
@@ -1076,12 +1478,17 @@ RENDER.logs = async function (v) {{
 
 RENDER.system = async function (v) {{
   const [sys, ov, unknown] = await Promise.all([
-    api("/api/system"), api("/api/overlay"), api("/api/unknown")
+    apiWithRetry("/api/system"), apiWithRetry("/api/overlay"), apiWithRetry("/api/unknown")
   ]);
   setPills(sys, null);
 
   let html = '<h1>System</h1>'
-    + '<div class="dim" style="margin:4px 0 16px">What is actually true of this '
+    + '<div class="toolbar" style="margin-bottom:14px">'
+    + '<button class="btn" id="sys-reload">Reload system data</button>'
+    + '<span class="tiny dim" style="margin-left:10px">Re-reads the live system '
+    + 'state from the server. Use this if a view reported a transient fetch error.</span>'
+    + '</div>'
+    + '<div class="dim" style="margin:-6px 0 16px">What is actually true of this '
     + 'machine, reported rather than assumed.</div>';
 
   const s = sys.sandbox || {{}};
@@ -1102,6 +1509,26 @@ RENDER.system = async function (v) {{
       + 'and it has no filesystem, shell or network access through any code path. '
       + 'What the container adds is assurance about everything else on the machine, '
       + 'not about the model.', "info"));
+
+  html += panel("Docker",
+    s.docker_available ? tag("available", "ok") : tag("unavailable", "err"),
+    '<div class="kv">'
+    + '<span class="k">docker available</span><span class="v">' + (s.docker_available ? "yes" : "no")
+      + " \\u2014 " + esc(s.docker_detail || "") + '</span>'
+    + '<span class="k">dockerfile</span><span class="v">'
+      + (sys.paths && sys.paths.root ? esc(sys.paths.root + "/docker/Dockerfile") : "docker/Dockerfile") + '</span>'
+    + '<span class="k">compose</span><span class="v">'
+      + (sys.paths && sys.paths.root ? esc(sys.paths.root + "/docker/docker-compose.yml") : "docker/docker-compose.yml") + '</span>'
+    + '</div>'
+    + (s.docker_available
+      ? note('<b>Docker is installed.</b> You can build and run the isolated '
+        + 'benchmark container from the command line. The dashboard cannot '
+        + 'execute docker itself, but the paths above are where the shipped '
+        + 'artefacts live.', "ok")
+      : note('<b>Docker is not installed or not reachable.</b> The container '
+        + 'path described in <code>docker/sandbox.md</code> cannot be executed '
+        + 'from this machine. The benchmark still runs; this is OS-level '
+        + 'assurance only.', "warn")));
 
   // The rasteriser is the difference between "a vision run works" and "a vision
   // run silently sends text only". It is also per-interpreter, so the check
@@ -1161,6 +1588,22 @@ RENDER.system = async function (v) {{
       : '<div class="empty">Every provider that needs a key has one.</div>');
 
   v.innerHTML = html;
+  const reloadBtn = $("#sys-reload");
+  if (reloadBtn) {{
+    reloadBtn.addEventListener("click", async () => {{
+      reloadBtn.disabled = true;
+      reloadBtn.textContent = "reloading\u2026";
+      try {{
+        await show("system");
+        toast("system data reloaded", "good");
+      }} catch (e) {{
+        toast(e.message, "bad");
+      }} finally {{
+        reloadBtn.disabled = false;
+        reloadBtn.textContent = "Reload system data";
+      }}
+    }});
+  }}
 }};
 
 // ---- replays + storyboard + export ----------------------------------------
@@ -1192,7 +1635,7 @@ async function exportRuns(format) {{
 let REPLAY_RUN = null;   // set by Storyboard / a run link to preselect
 
 RENDER.replays = async function (v) {{
-  const runs = await api("/api/runs");
+  const runs = await apiWithRetry("/api/runs");
   const clean = (runs.runs || []).filter(r => r.status === "success");
   const opts = clean.length ? clean : (runs.runs || []);
   let sel = REPLAY_RUN || (opts[0] && opts[0].run_id) || "";
@@ -1308,7 +1751,7 @@ RENDER.replays = async function (v) {{
 }};
 
 RENDER.storyboard = async function (v) {{
-  const runs = await api("/api/runs");
+  const runs = await apiWithRetry("/api/runs");
   const all = runs.runs || [];
   let html = '<h1>Storyboard</h1>'
     + '<div class="dim" style="margin:4px 0 16px">Every run as a card. Click one to '
@@ -1344,6 +1787,7 @@ RENDER.storyboard = async function (v) {{
 // ---- forms (modals) --------------------------------------------------------
 
 function modal(title, bodyHtml, onSubmit) {{
+  closeModal();
   const wrap = document.createElement("div");
   wrap.style.cssText = "position:fixed;inset:0;background:rgba(18,20,24,.34);"
     + "z-index:90;display:flex;align-items:flex-start;justify-content:center;"
@@ -1358,12 +1802,10 @@ function modal(title, bodyHtml, onSubmit) {{
     + '<button class="btn" id="m-cancel">Cancel</button>'
     + '<button class="btn primary" id="m-ok">Save</button></div></div>';
   document.body.appendChild(wrap);
-  const close = () => wrap.remove();
+  CURRENT_MODAL = wrap;
+  const close = () => {{ wrap.remove(); CURRENT_MODAL = null; }};
   $("#m-cancel", wrap).addEventListener("click", close);
   wrap.addEventListener("click", e => {{ if (e.target === wrap) close(); }});
-  document.addEventListener("keydown", function esc2(e) {{
-    if (e.key === "Escape") {{ close(); document.removeEventListener("keydown", esc2); }}
-  }});
   $("#m-ok", wrap).addEventListener("click", async () => {{
     const body = $("#m-body", wrap);
     try {{

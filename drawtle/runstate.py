@@ -37,6 +37,7 @@ Design rules
 """
 import json
 import os
+import re
 import time
 
 STATUS_STARTED = "started"
@@ -44,6 +45,12 @@ STATUS_SUCCESS = "success"
 STATUS_ERROR = "error"
 STATUS_INTERRUPTED = "interrupted"
 STATUS_UNKNOWN = "unknown"
+
+#: A run id is used as a file-name component in several places, and it reaches
+#: `os.path.join` directly in the delete path. This is the same shape the
+#: launch guard accepts (`guard._RUN_ID_RE`), duplicated here rather than
+#: imported so the run-lifecycle module does not depend on the web layer.
+_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 #: Statuses that mean "this run's numbers are complete and safe to analyse".
 #: Note that `unknown` is NOT in here: a run that predates status tracking may
@@ -243,3 +250,60 @@ def read_jsonl(path, strict=True):
 def status_of(out_dir, run_id):
     """Convenience: the status string alone."""
     return read_status(out_dir, run_id).get("status", STATUS_UNKNOWN)
+
+
+def delete_run(out_dir, run_id):
+    """Remove all files belonging to one run from disk.
+
+    Returns a dict describing what was removed and what was missing.
+
+    Refuses a run id that is not a plain file name component: the id reaches
+    `os.path.join(out_dir, ...)` directly, so "../" or a nested path would let
+    a caller name a file the run does not own. A run that is still in progress
+    (`started`) is also refused, because deleting a live run's status file
+    would orphan a process that is still writing its log.
+    """
+    if not _SAFE_RUN_ID.match(str(run_id or "")):
+        return {"run_id": run_id, "removed": [], "missing": [],
+                "error": "run_id must be a plain name (letters, digits, dot, "
+                         "dash, underscore) with no path separators"}
+    base = os.path.join(str(out_dir), str(run_id))
+    real_base = os.path.realpath(base)
+    real_dir = os.path.realpath(str(out_dir))
+    if os.path.dirname(real_base) != real_dir:
+        return {"run_id": run_id, "removed": [], "missing": [],
+                "error": "run_id resolves outside the results directory"}
+
+    st = read_status(out_dir, run_id)
+    if st.get("status") == STATUS_STARTED:
+        return {"run_id": run_id, "removed": [], "missing": [],
+                "error": "run is still in progress; stop it before deleting"}
+
+    paths = run_paths(out_dir, run_id)
+    removed = []
+    missing = []
+    for key, p in paths.items():
+        if os.path.dirname(os.path.realpath(p)) != real_dir:
+            missing.append(key)
+            continue
+        if not os.path.exists(p):
+            missing.append(key)
+            continue
+        try:
+            os.remove(p)
+            removed.append(key)
+        except OSError:
+            missing.append(key)
+    # Also remove the transcript sidecar if present.
+    transcript = os.path.join(out_dir, run_id + ".jsonl.transcript.json")
+    if os.path.dirname(os.path.realpath(transcript)) == real_dir:
+        if os.path.exists(transcript):
+            try:
+                os.remove(transcript)
+                removed.append("transcript")
+            except OSError:
+                missing.append("transcript")
+    if not removed:
+        return {"run_id": run_id, "removed": [], "missing": missing,
+                "error": "no files belonging to this run were found"}
+    return {"run_id": run_id, "removed": removed, "missing": missing}

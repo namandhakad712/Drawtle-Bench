@@ -147,7 +147,8 @@ class ModelBackend:
                 if model.startswith(k):
                     self.price = v
                     break
-        if not prices and self.info.get("price_in") is not None:
+        if not prices and self.info.get("price_in") is not None \
+                and self.info.get("price_out") is not None:
             self.price = {"in": float(self.info["price_in"]),
                           "out": float(self.info["price_out"])}
         if self.price is None:
@@ -206,6 +207,41 @@ class ModelBackend:
                 f"  or check the setup first:  python analysis/preflight.py "
                 f"--backend {self.name}")
 
+    def _post_with_deadline(self, messages, **kw):
+        """Run `_post` under a hard wall-clock deadline.
+
+        urllib's `timeout` is per-socket-operation, not a request deadline: a
+        provider that completes the TLS handshake and then trickles the request
+        body one byte at a time (or stalls mid-send and never closes the
+        socket) keeps every individual send under the limit, so `urlopen` never
+        raises and the run hangs forever. That is not hypothetical -- InternLM's
+        endpoint was observed doing exactly this, killing an entire run at turn
+        zero with no error, no log line and no progress.
+
+        The fix is a real deadline. `_post` runs in a worker thread; if it does
+        not return within `timeout_s` the main thread raises `TimeoutError`,
+        which `complete`'s retry loop already handles like any other transient
+        failure. The worker is a daemon, so a genuinely stuck socket dies with
+        the process instead of blocking exit.
+        """
+        import threading
+        box = {}
+        def _run():
+            try:
+                box["ok"] = self._post(messages, **kw)
+            except BaseException as e:        # noqa: BLE001 - reported to caller
+                box["err"] = e
+        th = threading.Thread(target=_run, daemon=True)
+        th.start()
+        th.join(self.timeout_s)
+        if "ok" in box:
+            return box["ok"]
+        if "err" in box:
+            raise box["err"]
+        raise TimeoutError(
+            f"{self.name}: request did not finish within {self.timeout_s:.0f}s "
+            f"(the provider stalled after connecting; the socket is abandoned).")
+
     def complete(self, messages, temperature=0.0, max_tokens=256, **kw):
         """Call the model with retries. Returns ModelResponse."""
         self.require_key()
@@ -213,8 +249,9 @@ class ModelBackend:
         for attempt in range(self.max_retries + 1):
             try:
                 t0 = time.time()
-                payload = self._post(messages, temperature=temperature,
-                                     max_tokens=max_tokens, **kw)
+                payload = self._post_with_deadline(
+                    messages, temperature=temperature,
+                    max_tokens=max_tokens, **kw)
                 lat = time.time() - t0
                 return self._wrap(payload, lat)
             except urllib.error.HTTPError as e:

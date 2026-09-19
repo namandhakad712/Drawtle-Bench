@@ -84,18 +84,37 @@ class Job:
         self._tail = []
         self.proc = None
         self.error = None
+        self._logfh = None
 
     # -- output ----------------------------------------------------------
 
     def _append(self, line):
+        """Keep the bounded tail AND append to the on-disk log.
+
+        The tail is what the Logs tab shows live; the disk log is the
+        permanent record, so a dashboard restart never loses the story of a
+        run. One `logs/<run_id>.log` per run, plain text -- grep-able by the
+        operator, crash-safe because we append with no buffering games.
+        """
+        line = line.rstrip("\n")
         with self._lock:
-            self._tail.append(line.rstrip("\n"))
+            self._tail.append(line)
             if len(self._tail) > TAIL_LINES:
                 del self._tail[:len(self._tail) - TAIL_LINES]
+            if self._logfh is not None:
+                try:
+                    self._logfh.write(line + "\n")
+                    self._logfh.flush()
+                except Exception:                  # noqa: BLE001 - must not kill the run
+                    pass
 
     def tail(self):
         with self._lock:
             return list(self._tail)
+
+    @property
+    def log_path(self):
+        return os.path.join("logs", str(self.run_id or self.job_id) + ".log")
 
     # -- state -----------------------------------------------------------
 
@@ -186,7 +205,15 @@ class Supervisor:
             raise ValueError("a run id may contain letters, digits, dot, dash "
                              "and underscore only")
 
-        cmd = [sys.executable, os.path.join(ROOT, "bench.py"), "run",
+        # The job runs under SOMEWHERE's Python. `sys.executable` is the
+        # right default (the interpreter serving this page), but it may be a
+        # bare system install without the rasteriser or SDK extras that the
+        # bench environment has. `DRAWTLE_PYTHON` lets the operator point the
+        # control centre at the environment actually built for running the
+        # bench (e.g. a venv with playwright/cairosvg), so a run spawned from
+        # the UI never fails at turn 0 for "no rasteriser".
+        interpreter = os.environ.get("DRAWTLE_PYTHON") or sys.executable
+        cmd = [interpreter, os.path.join(ROOT, "bench.py"), "run",
                "--backend", backend, "--model", model,
                "--dataset", dataset,
                "--out-dir", self.results_dir,
@@ -207,6 +234,11 @@ class Supervisor:
 
         job_id = uuid.uuid4().hex[:12]
         job = Job(job_id, cmd, run_id or "(auto)", backend, model)
+        os.makedirs("logs", exist_ok=True)
+        try:
+            job._logfh = open(job.log_path, "a", encoding="utf-8")
+        except OSError:
+            job._logfh = open(os.devnull, "w")   # logging must never block a run
 
         env = dict(os.environ)
         env["PYTHONUNBUFFERED"] = "1"      # so the tail is live, not block-buffered
@@ -234,34 +266,42 @@ class Supervisor:
     def _pump(self, job):
         """Read the child's output into the bounded tail until it exits."""
         try:
-            for line in job.proc.stdout:
-                job._append(line)
-        except Exception as e:                     # pragma: no cover - rare
-            job._append(f"[supervisor] read error: {type(e).__name__}: {e}")
-        job.returncode = job.proc.wait()
-        job.finished = time.time()
-        job._append(f"[supervisor] process exited with code {job.returncode}")
-        # Reconcile a hard exit. A child killed by SIGKILL/OOM (POSIX) or by the
-        # OS (Windows) never runs its own cleanup, so its status file can be left
-        # pinned on `started` forever -- which every reader treats as "still
-        # going". A non-zero exit whose status is still `started` is a crash, not
-        # a finish; record it as such. Zero and the controlled 130 (SIGINT) are
-        # left alone, because those paths write their own terminal status.
-        if job.returncode not in (0, 130):
             try:
-                from drawtle import runstate as RS
-                if RS.status_of(self.results_dir, job.run_id) == RS.STATUS_STARTED:
-                    RS.mark_finished(
-                        self.results_dir, job.run_id, RS.STATUS_ERROR,
-                        {"error": f"process exited with code {job.returncode} "
-                                  f"and wrote no terminal status; the supervisor "
-                                  f"recorded the failure on its behalf",
-                         "returncode": job.returncode,
-                         "stopped_by": "supervisor-crash-detect"})
-                    job._append("[supervisor] child exited uncleanly; recorded "
-                                "as error")
+                for line in job.proc.stdout:
+                    job._append(line)
             except Exception as e:                 # pragma: no cover - rare
-                job._append(f"[supervisor] could not record the exit: {e}")
+                job._append(f"[supervisor] read error: {type(e).__name__}: {e}")
+            job.returncode = job.proc.wait()
+            job.finished = time.time()
+            job._append(f"[supervisor] process exited with code {job.returncode}")
+            # Reconcile a hard exit. A child killed by SIGKILL/OOM (POSIX) or by
+            # the OS (Windows) never runs its own cleanup, so its status file can
+            # be left pinned on `started` forever -- which every reader treats as
+            # "still going". A non-zero exit whose status is still `started` is a
+            # crash, not a finish; record it as such. Zero and the controlled
+            # 130 (SIGINT) are left alone, because those paths write their own
+            # terminal status.
+            if job.returncode not in (0, 130):
+                try:
+                    from drawtle import runstate as RS
+                    if RS.status_of(self.results_dir, job.run_id) == RS.STATUS_STARTED:
+                        RS.mark_finished(
+                            self.results_dir, job.run_id, RS.STATUS_ERROR,
+                            {"error": f"process exited with code {job.returncode} "
+                                      f"and wrote no terminal status; the supervisor "
+                                      f"recorded the failure on its behalf",
+                             "returncode": job.returncode,
+                             "stopped_by": "supervisor-crash-detect"})
+                        job._append("[supervisor] child exited uncleanly; recorded "
+                                    "as error")
+                except Exception as e:             # pragma: no cover - rare
+                    job._append(f"[supervisor] could not record the exit: {e}")
+        finally:
+            if job._logfh is not None:
+                try:
+                    job._logfh.close()
+                except OSError:
+                    pass
 
     # -- stopping --------------------------------------------------------
 

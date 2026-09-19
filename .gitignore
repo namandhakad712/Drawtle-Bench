@@ -38,3 +38,8 @@ results/frames/
 # scratch end-to-end runs
 e2e/
 .scratch/
+
+# ---- runtime logs ----------------------------------------------------------
+# One logs/<run_id>.log per supervisor job (recreatable; not an input).
+logs/
+results/*.log

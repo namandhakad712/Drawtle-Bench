@@ -29,7 +29,11 @@
 services:
   bench:
     build:
-      context: .
+      # `context` is resolved against the compose file's directory, so from
+      # the repo root this must point one level UP (..) to reach the files the
+      # Dockerfile COPYs (drawtle/, web/, bench.py). Building from inside
+      # docker/ with `.` is a different thing and fails on `COPY bench.py`.
+      context: ..
       dockerfile: docker/Dockerfile
     image: drawtle-bench:latest
     user: "1000:1000"
