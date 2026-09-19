@@ -343,12 +343,18 @@ CSS = """
 --r:10px;--r2:14px;
 --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
 --sans:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
---serif:ui-serif,Georgia,'Times New Roman',serif}
-@media (prefers-color-scheme:dark){:root{
+--serif:ui-serif,Georgia,'Times New Roman',serif;color-scheme:light}
+@media (prefers-color-scheme:dark){
+:root:not([data-theme="light"]){
 --bg:#111310;--bg2:#171a15;--fg:#e9e7e0;--mut:#a0a6b0;--faint:#767c86;
 --line:#282c24;--line2:#353a30;--pan:#171a15;--code:#1c2018;
 --acc:#e0a878;--acc2:#84c8f0;--ok:#74d29a;--warn:#e3b467;--bad:#f08a8a;
---sh:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25)}}
+--sh:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25);color-scheme:dark}}
+:root[data-theme="dark"]{
+--bg:#111310;--bg2:#171a15;--fg:#e9e7e0;--mut:#a0a6b0;--faint:#767c86;
+--line:#282c24;--line2:#353a30;--pan:#171a15;--code:#1c2018;
+--acc:#e0a878;--acc2:#84c8f0;--ok:#74d29a;--warn:#e3b467;--bad:#f08a8a;
+--sh:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25);color-scheme:dark}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--fg);font:16.5px/1.7 var(--serif);
@@ -426,8 +432,9 @@ border-radius:var(--r2);background:var(--pan)}
    both themes -- the alternative is two rendered sets, which doubles the
    surface that can drift. */
 @media (prefers-color-scheme:dark){
-figure img{filter:brightness(.86) contrast(1.02) saturate(.92)}
+:root:not([data-theme="light"]) figure img{filter:brightness(.86) contrast(1.02) saturate(.92)}
 }
+:root[data-theme="dark"] figure img{filter:brightness(.86) contrast(1.02) saturate(.92)}
 @media(min-width:1180px){
 figure{margin-left:-92px;margin-right:-92px}
 figure figcaption{padding-left:94px;padding-right:94px}
@@ -468,8 +475,130 @@ footer a{color:var(--mut)}
 nav{position:static;max-height:none;border-right:0;border-bottom:1px solid var(--line);
 padding:18px 24px}nav .toc{display:none}main{padding:30px 22px 90px;max-width:none}
 .masthead .tag{display:none}}
+
+/* ---- theme toggle, reading progress, back-to-top, copy, a11y ---- */
+::selection{background:var(--acc);color:#fff}
+:focus-visible{outline:2px solid var(--acc2);outline-offset:2px;border-radius:3px}
+.skip{position:absolute;left:14px;top:-52px;z-index:60;background:var(--pan);color:var(--fg);
+padding:9px 14px;border:1px solid var(--line2);border-radius:8px;font-family:var(--sans);
+font-size:13px;text-decoration:none;transition:top .15s}
+.skip:focus{top:12px}
+.progress{position:fixed;left:0;top:0;height:3px;width:0;z-index:40;
+background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .08s linear}
+.masthead .th{margin-left:10px;display:inline-flex;align-items:center;justify-content:center;
+width:34px;height:30px;border:1px solid var(--line2);border-radius:7px;background:transparent;
+color:var(--mut);cursor:pointer;padding:0;transition:color .15s,border-color .15s,background .15s}
+.masthead .th:hover{color:var(--fg);border-color:var(--faint);background:var(--bg2)}
+.masthead .th svg{width:16px;height:16px;display:block}
+.masthead .th .i-light,.masthead .th .i-dark{display:none}
+:root[data-theme="light"] .masthead .th .i-auto,
+:root[data-theme="light"] .masthead .th .i-dark{display:none}
+:root[data-theme="light"] .masthead .th .i-light{display:block}
+:root[data-theme="dark"] .masthead .th .i-auto,
+:root[data-theme="dark"] .masthead .th .i-light{display:none}
+:root[data-theme="dark"] .masthead .th .i-dark{display:block}
+.totop{position:fixed;right:20px;bottom:20px;z-index:35;width:42px;height:42px;border-radius:50%;
+border:1px solid var(--line2);background:var(--pan);color:var(--fg);box-shadow:var(--sh);
+cursor:pointer;display:grid;place-items:center;opacity:0;transform:translateY(8px);
+pointer-events:none;transition:opacity .2s,transform .2s,border-color .15s,color .15s}
+.totop.show{opacity:1;transform:none;pointer-events:auto}
+.totop:hover{border-color:var(--faint);color:var(--acc)}
+.totop svg{width:18px;height:18px}
+pre{position:relative}
+.copy{position:absolute;top:9px;right:9px;border:1px solid var(--line2);background:var(--pan);
+color:var(--mut);font:11.5px/1 var(--sans);padding:6px 9px;border-radius:6px;cursor:pointer;
+opacity:0;transition:opacity .15s,color .15s,border-color .15s}
+pre:hover .copy,.copy:focus-visible{opacity:1}
+.copy:hover{color:var(--fg);border-color:var(--faint)}
+.copy.ok{color:var(--ok);border-color:var(--ok)}
+nav .toc a.cur{color:var(--acc);font-weight:600}
+h1,h2,h3,h4{text-wrap:balance}
+p,li{text-wrap:pretty}
+a{transition:color .15s}
+@media (prefers-reduced-motion:reduce){
+html{scroll-behavior:auto}
+.progress{transition:none}
+*{transition-duration:.001ms!important;animation-duration:.001ms!important}
+}
+@media print{
+.masthead,.progress,.totop,.skip,.copy{display:none!important}
+body{overflow-x:visible}
+.wrap{display:block;max-width:none}
+nav{display:none}
+main{max-width:none;padding:24px}
+figure{margin:1em 0}
+a{color:#000;text-decoration:underline}
+}
 """
 
+
+
+NOFLASH = """try{var t=localStorage.getItem("drawtle-theme");if(t==="light"||t==="dark"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}"""
+
+MAINJS = """(function(){
+  var root=document.documentElement;
+  var btn=document.getElementById("th");
+  function mode(){return root.getAttribute("data-theme")||"auto";}
+  function setMode(m){
+    if(m==="auto"){root.removeAttribute("data-theme");try{localStorage.removeItem("drawtle-theme");}catch(e){}}
+    else{root.setAttribute("data-theme",m);try{localStorage.setItem("drawtle-theme",m);}catch(e){}}
+    var next={auto:"light",light:"dark",dark:"auto"}[m];
+    var word={auto:"system",light:"light",dark:"dark"}[m];
+    if(btn)btn.title="Theme: "+word+" — click for "+next;
+  }
+  if(btn){
+    btn.addEventListener("click",function(){setMode(mode()==="auto"?"light":mode()==="light"?"dark":"auto");});
+    btn.title="Theme: "+(mode()==="auto"?"system":mode())+" — click to switch";
+  }
+  var bar=document.getElementById("progress");
+  function onScroll(){
+    var d=document.documentElement;
+    var max=d.scrollHeight-d.clientHeight;
+    var y=d.scrollTop||document.body.scrollTop||0;
+    if(bar)bar.style.width=(max>0?(y/max*100):0)+"%";
+    var t=document.getElementById("totop");
+    if(t)t.classList.toggle("show",y>480);
+  }
+  window.addEventListener("scroll",onScroll,{passive:true});
+  window.addEventListener("resize",onScroll);
+  onScroll();
+  var totop=document.getElementById("totop");
+  if(totop)totop.addEventListener("click",function(){window.scrollTo({top:0,behavior:"smooth"});});
+  var toc={};
+  document.querySelectorAll("nav .toc a").forEach(function(a){
+    var h=a.getAttribute("href");
+    if(h&&h.charAt(0)==="#")toc[h.slice(1)]=a;
+  });
+  if("IntersectionObserver" in window&&Object.keys(toc).length){
+    var io=new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        if(e.isIntersecting){
+          for(var k in toc)toc[k].classList.remove("cur");
+          if(toc[e.target.id])toc[e.target.id].classList.add("cur");
+        }
+      });
+    },{rootMargin:"-15% 0px -75% 0px",threshold:0});
+    Object.keys(toc).forEach(function(id){
+      var el=document.getElementById(id);
+      if(el)io.observe(el);
+    });
+  }
+  document.querySelectorAll("pre").forEach(function(pre){
+    var b=document.createElement("button");
+    b.type="button";b.className="copy";b.textContent="Copy";
+    b.addEventListener("click",function(){
+      var code=pre.querySelector("code");
+      var txt=code?code.innerText:pre.innerText;
+      if(navigator.clipboard){
+        navigator.clipboard.writeText(txt).then(function(){
+          b.textContent="Copied";b.classList.add("ok");
+          setTimeout(function(){b.textContent="Copy";b.classList.remove("ok");},1400);
+        });
+      }
+    });
+    pre.appendChild(b);
+  });
+})();"""
 
 
 def page(title, body, toc, pages, current, desc):
@@ -484,28 +613,37 @@ def page(title, body, toc, pages, current, desc):
         nav.append("</div>")
     nav.append("</nav>")
 
-    return f"""<!DOCTYPE html>
+    head = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} — Drawtle Bench</title>
 <meta name="description" content="{html.escape(desc)}">
+<meta name="theme-color" content="#fcfcfa">
 <meta property="og:title" content="{html.escape(title)} — Drawtle Bench">
 <meta property="og:description" content="{html.escape(desc)}">
 <meta property="og:type" content="article">
 <link rel="stylesheet" href="assets/site.css">
-</head>
-<body>
+<script>{NOFLASH}</script>
+</head>"""
+    shell = f"""<body>
+<a class="skip" href="#content">Skip to content</a>
+<div class="progress" id="progress" aria-hidden="true"></div>
 <header class="masthead"><div class="in">
 <span class="mk"><a href="index.html">Drawtle Bench</a></span>
 <span class="tag">Memory dominance in vision-language agents</span>
 <span class="sp"></span>
+<button class="th" id="th" type="button" aria-label="Toggle colour theme" title="Theme: auto">
+<svg class="i-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/></svg>
+<svg class="i-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+<svg class="i-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+</button>
 <a class="gh" href="https://github.com/namandhakad712/Drawtle-Bench">GitHub</a>
 </div></header>
 <div class="wrap">
 {chr(10).join(nav)}
-<main>
+<main id="content">
 {body}
 <footer>
 <p><strong>Drawtle Bench v2.5.0</strong> — the instrument is validated; the
@@ -519,9 +657,13 @@ comes from reference policies, and <code>PAPER.md</code> §8.2 says so.</p>
 </footer>
 </main>
 </div>
+<button class="totop" id="totop" type="button" aria-label="Back to top" title="Back to top">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</button>
+<script>{MAINJS}</script>
 </body>
-</html>
-"""
+</html>"""
+    return head + shell
 
 
 INDEX_EXTRA = """

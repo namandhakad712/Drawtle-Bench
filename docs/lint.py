@@ -50,6 +50,9 @@ def check_leaks(name, body, faults):
     # legitimate data (e.g. the ASCII architecture diagram, shell snippets).
     prose = re.sub(r"<pre>.*?</pre>", "", body, flags=re.S)
     prose = re.sub(r"<code[^>]*>.*?</code>", "", prose, flags=re.S)
+    # Inline <script> bodies are code, not prose -- the theme/UI script uses
+    # "||" and other punctuation the prose leak-check would false-positive on.
+    prose = re.sub(r"<script>.*?</script>", "", prose, flags=re.S)
 
     # raw markdown pipes that survived into a text node
     stray_pipes = re.findall(r">[^<]*\|[^<]*<", prose)
