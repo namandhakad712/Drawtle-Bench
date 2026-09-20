@@ -70,8 +70,14 @@ services:
 
   egress-proxy:
     build:
+      # `context: .` is resolved against this file's directory (docker/), so
+      # the Dockerfile path is relative to THAT, not to the repo root. The
+      # previous `docker/egress-proxy.Dockerfile` made Docker look for
+      # docker/docker/egress-proxy.Dockerfile and every `compose build` died
+      # with "The system cannot find the file specified" -- which surfaced as
+      # a 502 in the dashboard's Build action.
       context: .
-      dockerfile: docker/egress-proxy.Dockerfile
+      dockerfile: egress-proxy.Dockerfile
     image: drawtle-egress-proxy:latest
     user: "1000:1000"
     environment:
