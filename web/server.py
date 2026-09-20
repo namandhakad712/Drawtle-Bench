@@ -657,6 +657,28 @@ def run_summary_json(dir_, run_id):
     }, 200
 
 
+def first_frame(dir_, run_id):
+    """The first frame a run sent, as a data URI, or (None, False).
+
+    Used by the storyboard thumbnails. Walks the run's records (any episode)
+    and returns the first turn that carried a frame, reconstructed from the
+    message pool exactly as `replay_json` does -- so the thumbnail is the same
+    image the replay shows, not a second rendering of it.
+    """
+    jsonl = RS.run_paths(dir_, run_id)["jsonl"]
+    if not os.path.exists(jsonl):
+        return None, False
+    transcript = _load_transcript(dir_, run_id)
+    for t in (RS.read_jsonl(jsonl, strict=False) or []):
+        keys = t.get("prompt_keys")
+        if not keys:
+            continue
+        frame, _prompt, has = _turn_media(keys, transcript)
+        if has and frame:
+            return frame, True
+    return None, False
+
+
 def replay_json(dir_, run_id, ep):
     """Turn-by-turn data for one episode, as JSON for the in-app replay view.
 
@@ -915,6 +937,14 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send(_notfound("Run not found", "/"), code=code or 404)
                 else:
                     self._json(data, code=code)
+            elif path.startswith("/api/run/") and path.endswith("/thumb") \
+                    and path.count("/") == 4:
+                run_id = path.split("/")[3]
+                frame, has = first_frame(self.results_dir, run_id)
+                # The frame is a data URI (base64). Returning it inside JSON is
+                # fine for the single thumbnail the storyboard asks for per run;
+                # the runs list itself stays lean because it carries no images.
+                self._json({"run_id": run_id, "frame": frame, "has": has}, code=200)
             elif path.startswith("/api/replay/") and path.count("/") == 4:
                 _parts = path.split("/")
                 run_id, ep = _parts[3], _parts[4]

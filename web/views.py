@@ -2261,7 +2261,7 @@ RENDER.replays = async function (v) {{
     // Filmstrip: one thumbnail per turn, click scrolls to that turn card.
     const strip = turns.filter(t => t.frame).map((t, i) =>
       '<img src="' + esc(t.frame) + '" alt="turn ' + esc(t.turn) + '" title="turn '
-      + esc(t.turn) + '" class="strip" data-jump="' + i + '">').join("");
+      + esc(t.turn) + '" class="strip" data-cap="turn ' + esc(t.turn) + '">').join("");
     const cards = turns.map(t => {{
       const badge = (t.progressed === true ? "ok"
         : t.progressed === false ? "bad"
@@ -2270,8 +2270,9 @@ RENDER.replays = async function (v) {{
         ? '<span class="tag ok">vision</span>'
         : '<span class="tag" style="background:var(--panel2);color:var(--muted)">text-only</span>';
       const media = t.frame
-        ? '<img src="' + esc(t.frame) + '" alt="frame" style="max-width:200px;'
-          + 'max-height:200px;border:1px solid var(--rule);border-radius:6px;display:block">'
+        ? '<img class="frame-img" data-cap="turn ' + esc(t.turn) + '" src="'
+          + esc(t.frame) + '" alt="frame" style="max-width:200px;max-height:200px;'
+          + 'border:1px solid var(--rule);border-radius:6px;display:block;cursor:zoom-in">'
         : (d.is_vision ? '<div class="empty" style="width:200px;height:150px">'
           + 'no frame this turn</div>' : '');
       const raw = t.raw_model_text || "(no response recorded)";
@@ -2310,11 +2311,13 @@ RENDER.replays = async function (v) {{
       + (strip ? '<div class="striprow">' + strip + '</div>' : '')
       + '<div style="display:flex;align-items:flex-end;gap:3px;height:44px;margin-bottom:2px">'
       + bars + '</div>' + cards;
-    $$(".strip", $("#rp-stage")).forEach((img, i) =>
-      img.addEventListener("click", () => {{
-        const cardsEl = $$(".turn", $("#rp-stage"));
-        if (cardsEl[i]) cardsEl[i].scrollIntoView({{ behavior: "smooth", block: "start" }});
-      }}));
+    // Clicking a filmstrip thumbnail or a per-turn frame opens the lightbox,
+    // not a scroll -- the cards are already on screen below; zoom is what the
+    // reader wants from a thumbnail. The frame source travels with the element.
+    const framed = turns.filter(t => t.frame);
+    // The filmstrip and per-turn frames open the lightbox through a single
+    // document-level delegated handler registered once at load (see openLightbox
+    // below), so this survives re-renders without re-binding every turn.
   }}
 
   if (sel) await loadEpisodes(sel);
@@ -2374,6 +2377,7 @@ RENDER.storyboard = async function (v) {{
     return '<button class="sb-card" data-run="' + esc(r.run_id) + '">'
       + '<div class="row"><b class="mono tiny">' + esc(r.run_id) + '</b>' + tag(r.status, st)
       + '</div>'
+      + '<div class="sb-thumb" data-run="' + esc(r.run_id) + '"></div>'
       + '<div class="tiny dim" style="margin:5px 0">' + esc(r.model || "") + ' &middot; '
       + esc(r.backend || "") + '</div>' + bar
       + '<div class="tiny faint" style="margin-top:7px">'
@@ -2388,7 +2392,61 @@ RENDER.storyboard = async function (v) {{
     const b = e.target.closest("button[data-run]"); if (!b) return;
     REPLAY_RUN = b.dataset.run; show("replays");
   }});
+  // Storyboard thumbnails: one first-frame image per run, fetched in parallel
+  // from the dedicated thumb route so the runs list itself carries no images
+  // (a base64 frame per run would bloat the payload every other view consumes).
+  // A run with no frames simply keeps an empty slot -- no broken image icon.
+  const slots = Array.from(v.querySelectorAll(".sb-thumb"));
+  if (slots.length) {{
+    await Promise.all(slots.map(async el => {{
+      try {{
+        const d = await api("/api/run/" + encodeURIComponent(el.dataset.run) + "/thumb");
+        if (!v.isConnected || !d.has || !d.frame) return;
+        el.innerHTML = '<img class="sb-thumb-img" src="' + esc(d.frame)
+          + '" alt="first frame" data-cap="' + esc(el.dataset.run) + '">';
+        el.querySelector("img").addEventListener("click", ev => {{
+          ev.stopPropagation();            // don't also open the replay
+          openLightbox(d.frame, el.dataset.run + " · first frame");
+        }});
+      }} catch (e) {{ /* a missing thumb is not worth surfacing */ }}
+    }}));
+  }}
 }};
+
+// ---- lightbox -------------------------------------------------------------
+// The replay filmstrip and the per-turn frame are data URIs that the reader
+// cannot see at full size in a 200px card. Clicking one opens it over the whole
+// viewport. The CSS for this (.lb-wrap / .lb-inner / .lb-cap) already exists;
+// this is the behaviour that was missing. Esc or a click outside closes it.
+let _LB = null;
+function openLightbox(src, caption) {{
+  if (!src) return;
+  closeLightbox();
+  const wrap = document.createElement("div");
+  wrap.className = "lb-wrap";
+  wrap.innerHTML = '<div class="lb-inner"><img src="' + esc(src) + '" alt="frame">'
+    + '<div class="lb-cap"><span>' + esc(caption || "frame") + '</span>'
+    + '<span class="spacer"></span>'
+    + '<button class="lnk" data-lb-close>close &middot; Esc</button></div></div>';
+  document.body.appendChild(wrap);
+  _LB = wrap;
+  wrap.addEventListener("click", e => {{
+    if (e.target === wrap || e.target.closest("[data-lb-close]")) closeLightbox();
+  }});
+}}
+function closeLightbox() {{
+  if (_LB) {{ _LB.remove(); _LB = null; }}
+}}
+document.addEventListener("keydown", e => {{ if (e.key === "Escape") closeLightbox(); }});
+// One delegated handler for every zoomable image in the app. Registered once;
+// it survives view re-renders and covers the replay filmstrip (.strip), the
+// per-turn frame (.frame-img), and the storyboard thumbnails (.sb-thumb-img).
+// The storyboard thumb stops propagation itself so it does not also open the
+// replay (it lives inside a card that navigates).
+document.addEventListener("click", e => {{
+  const img = e.target.closest && e.target.closest(".strip, .frame-img");
+  if (img) openLightbox(img.getAttribute("src"), img.getAttribute("data-cap") || "frame");
+}});
 
 // ---- forms (modals) --------------------------------------------------------
 

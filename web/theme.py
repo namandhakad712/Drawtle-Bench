@@ -326,6 +326,13 @@ pre.log{
 }
 .sb-card:hover{border-color:var(--blue); box-shadow:0 6px 20px rgba(37,89,176,.14); transform:translateY(-2px)}
 .sb-card .row{justify-content:space-between}
+.sb-thumb{
+  width:100%; height:96px; margin:9px 0 3px; display:flex; align-items:center;
+  justify-content:center; background:var(--panel); border:1px solid var(--rule);
+  border-radius:var(--r3); overflow:hidden;
+}
+.sb-thumb-img{max-width:100%; max-height:96px; object-fit:contain; cursor:zoom-in}
+.sb-thumb-img:hover{filter:brightness(1.04)}
 
 /* ---------- replay filmstrip ---------- */
 .striprow{display:flex; gap:6px; overflow-x:auto; padding:4px 0 10px; margin-bottom:6px}

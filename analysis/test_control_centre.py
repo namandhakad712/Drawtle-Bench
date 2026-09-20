@@ -235,6 +235,20 @@ def main():
 
         st, runs = req("/api/runs")
         check("GET /api/runs", st == 200 and "runs" in runs, str(st))
+        # ---- M5: thumb route (storyboard frames + lightbox source) ----
+        # The committed mock runs carry no frames, so the route must report
+        # has:false rather than error. A 200 with the right shape is the contract
+        # the storyboard's async thumbnail loader relies on; a 500 here would
+        # break the whole storyboard render for every frameless run.
+        st, th = req("/api/run/mock-opt/thumb")
+        check("GET /api/run/<id>/thumb answers", st == 200 and "has" in th,
+              str((st, th)))
+        check("thumb reports no frame for a frameless run",
+              th.get("has") is False, str(th))
+        # An unknown run must not 500 -- first_frame tolerates a missing file
+        # and returns (None, False) rather than raising.
+        st, th2 = req("/api/run/does-not-exist/thumb")
+        check("thumb of an unknown run does not 500", st == 200, str((st, th2)))
         check("runs carry a status source",
               all("status_source" in r for r in runs["runs"]))
         check("runs distinguish clean from excluded",

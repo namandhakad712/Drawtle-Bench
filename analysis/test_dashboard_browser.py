@@ -266,6 +266,29 @@ def main():
                   "a committed reference artifact is gone -- the preview "
                   "executed instead of planning")
 
+            # ---- M5: the lightbox opens on a frame click and closes on Esc ----
+            # The replay filmstrip, the per-turn frame, and the storyboard
+            # thumbnails all open the SAME lightbox through one document-level
+            # delegated handler. No real run in this fixture carries a frame, so
+            # we exercise the shared handler with a synthetic .strip image and
+            # assert the overlay appears and dismisses.
+            opened = pg.evaluate("""() => {
+              const img = document.createElement('img');
+              img.className = 'strip';
+              img.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+              document.body.appendChild(img);
+              img.click();
+              return !!document.querySelector('.lb-wrap');
+            }""")
+            check("clicking a frame opens the lightbox", opened,
+                  "no .lb-wrap appeared after the click")
+            closed = pg.evaluate("""() => {
+              document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+              return !document.querySelector('.lb-wrap');
+            }""")
+            check("Escape closes the lightbox", closed,
+                  "the overlay was still present after Esc")
+
             br.close()
     finally:
         httpd.shutdown()
