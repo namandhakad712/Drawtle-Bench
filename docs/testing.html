@@ -562,6 +562,20 @@ All 12 vision-wiring assertions, against a real localhost HTTP endpoint.
 The full run lifecycle (§5c): interruption at an episode boundary, the status written on the way out, resume skipping completed episodes, and the resumed aggregate covering the whole dataset. 40 assertions in <code>analysis/test_lifecycle.py</code>, wired into CI.
 </li>
 <li>
+<strong>The control centre's HTTP surface, 114 assertions in <code>analysis/test_control_centre.py</code>.</strong> Every route, including the ones that write. Among them: nine checks that prove the dashboard stays responsive while a provider probe is stuck on a black-hole socket — the regression guard for the Overview tab that used to hang forever — and a check that every Overview route answers in under three seconds while that probe is in flight.
+</li>
+<li>
+<strong>Every dashboard tab, driven in real Chromium, 13 assertions in <code>analysis/test_dashboard_browser.py</code>.</strong> Each tab must render real content and must not leave the shared error note behind, and no tab may raise a page error or a console error. It also asserts that the launch model list narrows with the provider and that every launch field carries a tooltip. This exists because <code>node --check</code> proves a script <em>parses</em> and not that a view <em>runs</em>: it found two shipped bugs on its first run — a <code>const</code> read above its own declaration in the Results view, and stale async renders writing into a replaced container.
+</li>
+<li>
+<strong><code>analysis/check_dashboard_js.py</code></strong> renders the page and runs <code>node --check</code> on the emitted <code>&lt;script&gt;</code>, so a broken dashboard fails before a user sees a spinner. It writes its scratch file to the system temp directory, not into <code>results/</code>.
+</li>
+</ul>
+<h3 id="the-isolation-rule-for-tests">The isolation rule for tests<a class="ah" href="#the-isolation-rule-for-tests" aria-label="link">#</a></h3>
+<p><strong>No test may write into the repository's data directories, or into the user's configuration.</strong> Both dashboard suites run entirely inside a <code>tempfile.mkdtemp()</code>: <code>Supervisor(results_dir=…, logs_dir=…)</code> and <code>make_server(…, logs_dir=…)</code> are configurable precisely so a run's results and logs can be redirected, and <code>DRAWTLE_OVERLAY_FILE</code> / <code>DRAWTLE_SETTINGS_FILE</code> point the overlay and settings at throwaway files. The suite therefore has <strong>nothing to clean up</strong>, which is strictly better than a cleanup that can fail.</p>
+<p>This rule is not theoretical. The suite previously ran against the real overlay and restored it on exit; a failure part-way through defeated the restore and reset a curated model list, which was unrecoverable. Related: an assertion of the form <code>len(models) &gt;= 90</code> was replaced with a comparison against the shipped registry file. A hardcoded count asserts something about the user's own curation, and the temptation when it fails is to edit their data — which is exactly what happened.</p>
+<ul>
+<li>
 Log integrity: a truncated tail and a mid-file bad line are distinguished, and both are refused by the strict reader.
 </li>
 <li>

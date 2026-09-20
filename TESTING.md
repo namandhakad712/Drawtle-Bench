@@ -713,6 +713,43 @@ which exists **only** in the registry — invented at test time, unknown to any 
   written on the way out, resume skipping completed episodes, and the resumed
   aggregate covering the whole dataset. 40 assertions in
   `analysis/test_lifecycle.py`, wired into CI.
+- **The control centre's HTTP surface, 114 assertions in
+  `analysis/test_control_centre.py`.** Every route, including the ones that
+  write. Among them: nine checks that prove the dashboard stays responsive while
+  a provider probe is stuck on a black-hole socket — the regression guard for the
+  Overview tab that used to hang forever — and a check that every Overview route
+  answers in under three seconds while that probe is in flight.
+- **Every dashboard tab, driven in real Chromium, 13 assertions in
+  `analysis/test_dashboard_browser.py`.** Each tab must render real content and
+  must not leave the shared error note behind, and no tab may raise a page error
+  or a console error. It also asserts that the launch model list narrows with the
+  provider and that every launch field carries a tooltip.
+  This exists because `node --check` proves a script *parses* and not that a view
+  *runs*: it found two shipped bugs on its first run — a `const` read above its
+  own declaration in the Results view, and stale async renders writing into a
+  replaced container.
+- **`analysis/check_dashboard_js.py`** renders the page and runs `node --check`
+  on the emitted `<script>`, so a broken dashboard fails before a user sees a
+  spinner. It writes its scratch file to the system temp directory, not into
+  `results/`.
+
+### The isolation rule for tests
+
+**No test may write into the repository's data directories, or into the user's
+configuration.** Both dashboard suites run entirely inside a
+`tempfile.mkdtemp()`: `Supervisor(results_dir=…, logs_dir=…)` and
+`make_server(…, logs_dir=…)` are configurable precisely so a run's results and
+logs can be redirected, and `DRAWTLE_OVERLAY_FILE` / `DRAWTLE_SETTINGS_FILE`
+point the overlay and settings at throwaway files. The suite therefore has
+**nothing to clean up**, which is strictly better than a cleanup that can fail.
+
+This rule is not theoretical. The suite previously ran against the real overlay
+and restored it on exit; a failure part-way through defeated the restore and
+reset a curated model list, which was unrecoverable. Related: an assertion of the
+form `len(models) >= 90` was replaced with a comparison against the shipped
+registry file. A hardcoded count asserts something about the user's own
+curation, and the temptation when it fails is to edit their data — which is
+exactly what happened.
 - Log integrity: a truncated tail and a mid-file bad line are distinguished, and
   both are refused by the strict reader.
 - Transcript pooling: byte-identical replay of every turn, tamper detection, and

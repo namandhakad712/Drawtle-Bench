@@ -1,5 +1,92 @@
 # Changelog
 
+## v2.7.0 — operability: per-session folders, test/live provenance, settings, and a doctor
+- **The Overview tab's infinite "loading" is fixed, and the cause was two bugs
+  compounding.** `web/server.py` served requests with `HTTPServer` rather than
+  `ThreadingHTTPServer`, so the dashboard -- which fires three fetches at once on
+  boot, polls the log view on a timer, and runs provider probes -- had every
+  request queued behind any one blocking handler. And
+  `drawtle/discovery._get` used urllib's `timeout`, which is a per-socket-operation
+  timeout rather than a wall-clock deadline, so a provider that accepted the
+  connection and never answered hung the worker **forever**. Together, one stuck
+  `/api/probe` froze the entire control centre: `/api/leaderboard` and
+  `/api/registry/summary` never fired, and the page sat on a spinner with a clean
+  console. The server is now threaded, and every outbound discovery call runs on a
+  daemon thread with a real deadline.
+- **Runs are filed per model and per session.** `results/<model>/<run_id>/{run.jsonl,
+  summary.json, status.json, done.json, report.html}` and
+  `logs/<model>/<run_id>.log`. Everything belonging to one session sits together,
+  and a model's runs are found at a glance. `bench.py migrate` moves older runs in
+  (it prints the plan and changes nothing until `--apply`). Both layouts are read,
+  so nothing that already exists stops working.
+- **`runstate.run_paths` is the single resolver for a run's files.** Seven call
+  sites in `web/server.py`, plus `cost.py`, `bench.py` and `ci_assert.py`, were
+  rebuilding filenames from the run id; a typo in any of them produced an
+  empty-but-valid-looking artifact. They all go through the resolver now.
+- **A run carries its own provenance: `live` or `test`.** The stamp is written into
+  the run's status and summary, not held in the place the file happens to sit --
+  because an exported, emailed or pasted result cannot be re-classified by whoever
+  reads it next. A mock run scores about 100% by construction, so a mock that reads
+  as a live result is the most misleading thing this bench could produce.
+  `bench.py run --run-mode`; `--mode` was already the optimal/stale experiment.
+- **Test mode in the control centre.** A header toggle shows self-test runs instead
+  of live ones, with a persistent banner saying plainly that nothing on the page is
+  a result about a model. Filtering happens on the server, so no view can forget to
+  apply it and leak a mock run into a leaderboard.
+- **Settings, stored outside the repository** (`drawtle/settings.py`), the same rule
+  the provider overlay follows: a preference must not dirty the working tree.
+  Validated on the way in **and on the way out**, because the file is editable by
+  hand and a value read from disk is as untrusted as one from a request. Unknown
+  keys are refused rather than stored -- a typo that is accepted silently is a
+  toggle that does nothing. A Settings tab, plus launch defaults, retention,
+  probe timeout, and a Docker-start permission that is **off by default**.
+- **Dark theme, behind a toggle.** The stylesheet's own docstring argued against
+  dark surfaces on the grounds that numbers read worse on them and print badly.
+  That reasoning is not withdrawn -- it is why light remains the default and the
+  theme is remembered in settings rather than taken from the OS -- and the
+  docstring now says so explicitly rather than claiming a rule the code no longer
+  follows. The components are repainted by swapping variables, so there is no
+  second stylesheet to drift.
+- **`bench.py doctor` — one command, one verdict.** Python, rasteriser, dataset,
+  sandbox, API keys, results directory: each is one thing that silently breaks a
+  run, and the exit code is the answer, so it works in CI as well as by hand.
+- **Launching a run cannot be aimed at the wrong provider any more.** The model
+  list follows the selected provider. It previously did not, and the failure was
+  worse than it sounds: `#l-backend` had no "(any provider)" option, so the browser
+  auto-selected the first provider alphabetically and the model list silently
+  narrowed to that provider's 8 models out of 90.
+- **Every launch field carries a `?` tooltip**, derived from the field's own help
+  text so a field added later cannot ship without one. "Stale lag (turns)" now says
+  what it is: how many turns behind the shown frame is, and that sweeping the lag
+  is what produces the memory-dominance curve.
+- **Deleting is idempotent.** `/api/model/delete` and `/api/provider/delete`
+  returned 400 for something already hidden, so a batch delete containing one
+  produced a wall of errors for an outcome the user had asked for. Deleting a run
+  now also removes its log, in either location, and prunes the empty folders.
+- **Deleting a run, deleting a model, and the batch UI report one summary line**
+  rather than one toast per item, and the client now reads the server's `message`
+  key -- the overlay endpoints' own explanations were being discarded in favour of
+  a bare status code.
+- **The test suite no longer touches the user's configuration or their data.**
+  It ran against the real overlay and restored it on exit; a failure part-way
+  through defeated the restore and reset a curated model list. Both suites now
+  point `DRAWTLE_OVERLAY_FILE`/`DRAWTLE_SETTINGS_FILE`, and their results and logs
+  directories, at a temporary directory, and write nothing into the repo -- so
+  there is nothing to clean up, which is strictly better than a cleanup that can
+  fail. An assertion of the form `len(models) >= 90` was replaced with a
+  comparison against the shipped registry file: a hardcoded count asserts
+  something about the user's own curation, and satisfying it by editing their
+  data is exactly how the list was lost.
+- **A browser smoke test, because `node --check` proves a script parses and not
+  that a view runs.** It drives every tab in real Chromium and fails on a broken
+  render or any console error, and it found two shipped bugs immediately: a
+  `const` read above its own declaration in the Results view (a temporal-dead-zone
+  error that broke the tab outright) and stale async renders writing into a
+  replaced container.
+- **`check_dashboard_js.py` writes its scratch file to the system temp directory**,
+  not `results/`. A check that pollutes the directory it validates is worse than no
+  check.
+
 ## v2.6.0 — control centre, live provider discovery, and the models imported from two agent harnesses
 - **`web/` is now a control centre, not a report.** It was read-only: it rendered
   summaries a CLI had already produced. It now configures providers and models,
