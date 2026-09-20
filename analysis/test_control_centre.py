@@ -353,6 +353,24 @@ def main():
                 if v is not None:
                     os.environ[k] = v
 
+        # ---- M3: docker control (status + the enum guard + graceful no-docker)
+        # The machine this suite runs on has no Docker daemon, so the action
+        # must return ok:false with a plain message -- never a 500, never a
+        # shell that hangs. The enum guard must reject anything not build|start|stop
+        # so a POST body cannot smuggle a command to subprocess.
+        st, dk = req("/api/docker")
+        check("GET /api/docker answers", st == 200 and "docker_available" in dk,
+              str((st, dk)))
+        check("GET /api/docker reports isolation level",
+              "level" in dk and dk["level"] in ("none", "docker",
+              "docker-requested-unavailable"), str(dk))
+        st, dkr = req("/api/docker", "POST", {"action": "build"})
+        check("POST /api/docker build degrades gracefully without docker",
+              st in (200, 502) and dkr.get("ok") is False, str((st, dkr)))
+        st, bad = req("/api/docker", "POST", {"action": "rm -rf /"})
+        check("POST /api/docker refuses a non-enum action (no injection)",
+              st == 400, str((st, bad)))
+
         # ---- preflight --------------------------------------------------
         st, pf = req("/api/preflight?backend=intern&model=intern-s1")
         check("GET /api/preflight", st == 200, str(st))

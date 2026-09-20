@@ -133,6 +133,23 @@ def main():
             check("the API keys panel offers a save control per provider",
                   n_key_inputs > 0, f"inputs={n_key_inputs}")
 
+            # ---- M3: Docker control surface --------------------------------
+            # The panel must be present, and when Docker is not installed (this
+            # machine) it must show its state and NOT offer actions -- offering a
+            # Build button that can only fail would be false comfort. A real
+            # host with Docker gets the three buttons instead.
+            check("the System view shows the Docker control panel",
+                  "Docker control" in sys_txt, sys_txt[:200])
+            dk_avail = pg.evaluate(
+                "() => !!document.querySelector('#view .tag') "
+                "&& /available/.test(document.querySelector('#view').innerText)")
+            n_dk_actions = pg.eval_on_selector_all(
+                "#view button[data-act^='dk-']", "els => els.length")
+            # Either three actions (docker present) or zero (withheld) -- never
+            # a partial set, and never actions that cannot run.
+            check("Docker actions are all-or-nothing (present or withheld)",
+                  n_dk_actions in (0, 3), f"dk buttons={n_dk_actions}")
+
 
             # Launch: choosing a provider must narrow the model list to that
             # provider's models. Asserted rather than assumed -- the whole point

@@ -1990,6 +1990,11 @@ RENDER.logs = async function (v) {{
 // ---- SYSTEM ----------------------------------------------------------------
 
 RENDER.system = async function (v) {{
+  // The four fast endpoints first, so the view paints immediately. Docker state
+  // is probed separately afterwards (see below): `docker info` against a dead
+  // daemon can take several seconds, and a slow probe must not pin the whole
+  // System view on a spinner -- the isolation and config panels are independent
+  // of it and should not wait.
   const [sys, ov, unknown, keys] = await Promise.all([
     apiWithRetry("/api/system"), apiWithRetry("/api/overlay"),
     apiWithRetry("/api/unknown"), apiWithRetry("/api/keys")
@@ -2024,25 +2029,15 @@ RENDER.system = async function (v) {{
       + 'What the container adds is assurance about everything else on the machine, '
       + 'not about the model.', "info"));
 
-  html += panel("Docker",
-    s.docker_available ? tag("available", "ok") : tag("unavailable", "err"),
-    '<div class="kv">'
-    + '<span class="k">docker available</span><span class="v">' + (s.docker_available ? "yes" : "no")
-      + " \\u2014 " + esc(s.docker_detail || "") + '</span>'
-    + '<span class="k">dockerfile</span><span class="v">'
-      + (sys.paths && sys.paths.root ? esc(sys.paths.root + "/docker/Dockerfile") : "docker/Dockerfile") + '</span>'
-    + '<span class="k">compose</span><span class="v">'
-      + (sys.paths && sys.paths.root ? esc(sys.paths.root + "/docker/docker-compose.yml") : "docker/docker-compose.yml") + '</span>'
-    + '</div>'
-    + (s.docker_available
-      ? note('<b>Docker is installed.</b> You can build and run the isolated '
-        + 'benchmark container from the command line. The dashboard cannot '
-        + 'execute docker itself, but the paths above are where the shipped '
-        + 'artefacts live.', "ok")
-      : note('<b>Docker is not installed or not reachable.</b> The container '
-        + 'path described in <code>docker/sandbox.md</code> cannot be executed '
-        + 'from this machine. The benchmark still runs; this is OS-level '
-        + 'assurance only.', "warn")));
+  // The Docker panel is now actionable (M3): build / start / stop the sandbox
+  // container from the UI, with live status. The body is filled separately
+  // after this view paints, because probing docker can be slow. When Docker is
+  // absent the actions are withheld entirely -- the panel must never imply a
+  // container can be run when the daemon is down. docker_status() reports that
+  // state honestly.
+  html += panel("Docker control", "checking…",
+    '<div id="dk-body"><div class="empty"><span class="spin"></span> '
+    + 'checking docker state…</div></div>');
 
   // The rasteriser is the difference between "a vision run works" and "a vision
   // run silently sends text only". It is also per-interpreter, so the check
@@ -2131,6 +2126,25 @@ RENDER.system = async function (v) {{
       + 'exported variable is untouched.', "info"));
 
   v.innerHTML = html;
+
+  // Fill the Docker panel now, off the critical path. `docker info` against a
+  // dead daemon is slow; painting the rest of the view first and dropping the
+  // result in here keeps the System tab responsive. The buttons it adds are
+  // caught by the delegated handler below (they live inside `v`).
+  (async () => {{
+    try {{
+      const dk = await apiWithRetry("/api/docker");
+      const el = $("#dk-body", v);
+      if (!el || !v.isConnected) return;
+      el.innerHTML = dockerPanelBody(dk);
+    }} catch (e) {{
+      const el = $("#dk-body", v);
+      if (el && v.isConnected)
+        el.innerHTML = '<div class="note err">Could not read docker state: '
+          + esc(e.message) + '</div>';
+    }}
+  }})();
+
   const reloadBtn = $("#sys-reload");
   if (reloadBtn) {{
     reloadBtn.addEventListener("click", async () => {{
@@ -2172,6 +2186,29 @@ RENDER.system = async function (v) {{
         toast("cleared " + clr.dataset.keyClear, "good");
         show("system");
       }} catch (err) {{ toast(err.message, "bad"); }}
+    }}
+    // M3: build / start / stop the sandbox container. The action is dispatched
+    // to the server, which only accepts build|start|stop, so no shell string
+    // from the client can reach subprocess. The output (docker's own log) is
+    // shown in place; Reload refreshes the status row above.
+    const dkact = e.target.closest("[data-act^='dk-']");
+    if (dkact) {{
+      const action = dkact.dataset.act.slice(3);     // dk-build -> build
+      const out = $("#dk-out", v);
+      if (out) out.textContent = action + " \u2026 (this can take a few minutes)";
+      dkact.disabled = true;
+      try {{
+        const r = await api("/api/docker", {{ method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{ action }}) }});
+        if (out) out.textContent = (r.ok ? "" : "FAILED\\n")
+          + (r.output || "(no output)");
+        toast(r.ok ? action + " done" : action + " failed", r.ok ? "good" : "bad");
+      }} catch (err) {{
+        if (out) out.textContent = "error: " + err.message;
+        toast(err.message, "bad");
+      }}
+      return;
     }}
   }});
 }};
@@ -2412,6 +2449,36 @@ RENDER.storyboard = async function (v) {{
     }}));
   }}
 }};
+
+// ---- docker control panel (M3) --------------------------------------------
+function dockerPanelBody(dk) {{
+  return '<div class="kv">'
+    + '<span class="k">docker</span><span class="v">' + (dk.docker_available ? "yes" : "no")
+      + " \\u2014 " + esc(dk.docker_detail || "") + '</span>'
+    + '<span class="k">current isolation</span><span class="v">' + esc(dk.level) + '</span>'
+    + '<span class="k">image built</span><span class="v">' + (dk.image_built ? "yes" : "no") + '</span>'
+    + '<span class="k">container</span><span class="v">' + esc(dk.container || "not started") + '</span>'
+    + '</div>'
+    + '<div class="toolbar" style="margin:8px 0 4px">'
+    + (dk.docker_available
+        ? '<button class="btn" data-act="dk-build">Build image</button>'
+          + '<button class="btn" data-act="dk-start">Start container</button>'
+          + '<button class="btn" data-act="dk-stop">Stop container</button>'
+        : '<span class="tiny dim">Actions disabled: Docker is not installed or '
+          + 'not reachable.</span>')
+    + '</div>'
+    + '<pre id="dk-out" class="mono tiny" style="white-space:pre-wrap;'
+    + 'max-height:200px;overflow:auto;background:var(--panel);border:1px solid'
+    + ' var(--rule);border-radius:6px;padding:9px;margin:6px 0 0"></pre>'
+    + (dk.docker_available
+        ? note('Build compiles the image from <code>docker/Dockerfile</code>; '
+          + 'Start brings the compose project up in the background; Stop tears '
+          + 'it down. These shell out to the Docker CLI on this host.', "info")
+        : note('<b>Docker is not installed or not reachable.</b> The container '
+          + 'path in <code>docker/sandbox.md</code> cannot be executed here. The '
+          + 'benchmark still runs on the host; this is OS-level assurance only.',
+          "warn"));
+}}
 
 // ---- lightbox -------------------------------------------------------------
 // The replay filmstrip and the per-turn frame are data URIs that the reader

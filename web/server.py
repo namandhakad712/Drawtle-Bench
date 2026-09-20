@@ -18,6 +18,7 @@ and every route is bounded:
   GET   /api/unknown            which limits are still unknown, and why
   GET   /api/probe              ask providers live (no cache)
   GET   /api/jobs               processes this server started
+  GET   /api/docker             docker availability + sandbox container state
   GET   /api/preflight          would this run start? (no network)
 
   POST  /api/run                start a run
@@ -29,6 +30,7 @@ and every route is bounded:
   POST  /api/model/delete       hide one
   POST  /api/adopt              write discovered models into the overlay
   POST  /api/keys               store or clear a key for one provider
+  POST  /api/docker             build | start | stop the sandbox container
 
 Bound on the local interface only. It is not a hardened multi-user service and
 does not pretend to be: it binds 127.0.0.1, it has no authentication, and the
@@ -46,6 +48,8 @@ import glob
 import html
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -679,6 +683,76 @@ def first_frame(dir_, run_id):
     return None, False
 
 
+# -- docker control ---------------------------------------------------------
+# The UI can build / start / stop the sandbox container defined in docker/.
+# Every action is an enum checked here so a POST body cannot inject a shell
+# command; the only thing that reaches subprocess is one of three fixed argv
+# lists. When Docker is absent the whole panel degrades to "not available" and
+# no action is offered -- a benchmark that pretends a container is runnable when
+# the daemon is down would be the worst kind of false comfort.
+_COMPOSE = os.path.join(ROOT, "docker", "docker-compose.yml")
+
+
+def docker_status():
+    """Probe Docker and the compose project; never raises."""
+    ok, detail = SBX.docker_available()
+    st = {
+        "docker_available": ok,
+        "docker_detail": detail,
+        "level": SBX.describe()["level"],
+        "image_built": False,
+        "container": None,            # "running" | "stopped" | None
+        "last": None,
+    }
+    if not ok:
+        return st
+    exe = shutil.which("docker")
+    try:
+        ps = subprocess.run([exe, "compose", "-f", _COMPOSE, "ps",
+                             "--format", "{{.State}}"],
+                            cwd=ROOT, capture_output=True, text=True, timeout=15)
+        states = [ln.strip() for ln in (ps.stdout or "").splitlines() if ln.strip()]
+        if states:
+            st["container"] = "running" if any(s == "running" for s in states) else "stopped"
+    except Exception:
+        pass
+    try:
+        imgs = subprocess.run([exe, "compose", "-f", _COMPOSE, "images", "-q"],
+                              cwd=ROOT, capture_output=True, text=True, timeout=15)
+        st["image_built"] = bool((imgs.stdout or "").strip())
+    except Exception:
+        pass
+    return st
+
+
+def docker_action(action):
+    """Run a Docker control action. Returns (ok, output, status_dict)."""
+    cmds = {
+        "build": ["compose", "-f", _COMPOSE, "build"],
+        "start": ["compose", "-f", _COMPOSE, "up", "-d"],
+        "stop":  ["compose", "-f", _COMPOSE, "down"],
+    }
+    if action not in cmds:
+        return False, f"unknown action {action!r}", docker_status()
+    ok, detail = SBX.docker_available()
+    if not ok:
+        return False, f"Docker is not available: {detail}", docker_status()
+    exe = shutil.which("docker")
+    try:
+        p = subprocess.run([exe, *cmds[action]], cwd=ROOT,
+                           capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        st = docker_status()
+        st["last"] = {"action": action, "ok": False,
+                      "output": "(docker timed out after 10m)", "rc": -1}
+        return False, "(docker timed out after 10m)", st
+    out = (p.stdout or "") + (p.stderr or "")
+    st = docker_status()
+    st["last"] = {"action": action, "ok": p.returncode == 0,
+                  "output": out[-2000:], "rc": p.returncode}
+    return p.returncode == 0, out[-2000:], st
+
+
 def replay_json(dir_, run_id, ep):
     """Turn-by-turn data for one episode, as JSON for the in-app replay view.
 
@@ -950,6 +1024,8 @@ class _Handler(BaseHTTPRequestHandler):
                 run_id, ep = _parts[3], _parts[4]
                 data, code = replay_json(self.results_dir, run_id, ep)
                 self._json(data, code=code)
+            elif path == "/api/docker":
+                self._json(docker_status(), code=200)
             else:
                 self._send(_notfound("No such page", "/"), code=404)
         except ValueError as e:
@@ -1121,6 +1197,13 @@ class _Handler(BaseHTTPRequestHandler):
                 n, p = DSC.apply_probe_to_registry(results)
                 return self._json({"ok": True, "n_written": n, "overlay": p,
                                    "probed": len(results)})
+            if path == "/api/docker":
+                action = str(body.get("action") or "").strip()
+                if action not in ("build", "start", "stop"):
+                    return self._err("action must be build|start|stop", 400)
+                ok, out, st = docker_action(action)
+                return self._json({"ok": ok, "output": out, "status": st},
+                                  code=200 if ok else 502)
             return self._err("no such endpoint", 404)
         except (DSC.OverlayWriteError, SET.SettingsWriteError) as e:
             # Not a 500: the request was well formed and the server is fine, it

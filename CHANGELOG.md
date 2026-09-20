@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased — finishing the dashboard (M3–M6)
+
+### M4 — API keys in the UI
+The dashboard printed only the credentials path; setting a key meant the CLI
+or a hand-edited file. Added `GET/POST /api/keys` backed by the existing
+credential store, with a per-provider table in the System view (masked current
+value, `type=password` input, Save / Clear). **No endpoint ever returns a key
+in full** — `key_status()` runs every raw secret through `catalog.mask()` and
+only the masked form leaves the server. The credential path is now
+env-overridable (`DRAWTLE_CRED_FILE`) so the suite writes nowhere the user
+cares about.
+
+### M5 — storyboard frame thumbnails + a lightbox
+The replay already rendered frames, but a 200px card hid the detail and there
+was no way to look closer; the storyboard showed text cards only.
+- A click-to-zoom **lightbox** (CSS already existed; the behaviour was missing).
+  One document-level delegated handler opens it for the replay filmstrip
+  (`.strip`), the per-turn frame (`.frame-img`), and the storyboard thumbnails
+  (`.sb-thumb-img`); Esc or a click outside closes it.
+- **Storyboard thumbnails**: each card fetches its run's first frame from a new
+  `GET /api/run/<id>/thumb` route, in parallel, into its own slot. A run with no
+  frames keeps an empty slot — no broken-image icon. `first_frame()` walks the
+  run's records and returns the first turn that carried a frame, reconstructed
+  from the message pool exactly as `replay_json` does, so the thumbnail is the
+  same image the replay shows.
+
+### M3 — Docker control from the UI
+The System view's Docker panel was read-only. It is now actionable: **Build
+image / Start container / Stop container**, with live status (image built?,
+container running?). `docker_status()` and `docker_action()` shell out to the
+Docker CLI through **fixed argv lists only** — the POST body is checked against
+an enum (`build|start|stop`), so no command string from the client can reach
+`subprocess`. When Docker is absent the actions are withheld entirely and the
+panel says why. The docker probe runs *off the critical path*: the rest of the
+System view paints first, then the Docker body drops in, because `docker info`
+against a dead daemon can take seconds and must not pin the tab on a spinner.
+
 ## v2.7.1 — the audit findings, verified and fixed
 
 ### Results: filters, sorting, and retention that previews before it deletes
