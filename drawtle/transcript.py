@@ -28,6 +28,21 @@ Measured effect for a 48-turn vision episode with 48 distinct frames:
   pooled        48 image payloads        ~5 MB, plus 1,176 short keys
 That is the difference between a log you can commit and one you cannot.
 
+What the per-entry hash does and does not prove
+-----------------------------------------------
+Each pool entry carries a `sha256` of its own content, checked on read. That
+detects **accidental** damage -- a truncated write, a bad copy, a hand-edit that
+broke the JSON -- and it fails loudly rather than replaying a turn the model
+never actually had.
+
+It does **not** prove the transcript is authentic. The hash lives inside the
+object it protects, so anything able to rewrite an entry is equally able to
+recompute its hash. Claiming otherwise would be exactly the kind of overclaim
+this project avoids elsewhere: the guarantee is corruption-detection, not
+tamper-proofing. A hash that survives a hostile edit has to be recorded in a
+separate artifact with a different lifecycle (the run's summary), which is not
+done here.
+
 What is NOT lost
 ----------------
 `replay_transcript` reconstructs byte-identical messages from the pool, so this
@@ -205,7 +220,10 @@ class TranscriptPool:
             if ent.get("sha256") and _full_hash(ent["content"]) != ent["sha256"]:
                 raise ValueError(
                     f"pool entry {key!r} does not match its recorded hash; the "
-                    f"transcript has been modified and cannot be trusted")
+                    f"transcript is corrupt and cannot be replayed faithfully. "
+                    f"(This detects damage, not tampering -- see the module "
+                    f"docstring: a hash stored beside the content it protects "
+                    f"can be recomputed by whoever changed the content.)")
             out.append({"role": ent.get("role"), "content": ent["content"]})
         return out
 

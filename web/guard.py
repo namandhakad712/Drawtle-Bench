@@ -301,8 +301,12 @@ def save_model(payload):
     def _apply(ov):
         merged = dict(ov["models"].get(mid) or {})
         # A patch: keys the caller did not send keep their current merged value.
+        # `provider` is in the explicit list because a form that offers "(none)"
+        # must be able to clear it -- without that, choosing "(none)" sent None,
+        # None was skipped as "not sent", and the old provider silently stayed.
         for k, v in entry.items():
-            if v is not None or k in ("capabilities", "capability_source", "notes",
+            if v is not None or k in ("provider", "capabilities",
+                                      "capability_source", "notes",
                                       "price_in", "price_out", "context_window",
                                       "max_output", "price_known"):
                 merged[k] = v
@@ -311,6 +315,51 @@ def save_model(payload):
             ov["removed_models"].remove(mid)
     DSC.mutate_overlay(_apply)
     return mid, [], []
+
+
+def delete_models(ids):
+    """Hide several models in ONE overlay write. Returns (results, n_ok).
+
+    The dashboard used to POST one request per ticked model, and each of those
+    did its own read-modify-write of the overlay file -- load the JSON, mutate,
+    fsync, atomic replace. Deleting thirteen models meant thirteen full rewrites
+    of the same file, thirteen round trips, and thirteen independent chances for
+    one of them to fail. When one did, the user saw a wall of errors for what
+    was a single action, and the half that succeeded left the table in a state
+    they had not asked for.
+
+    One request, one read-modify-write, one atomic replace. Per-id outcomes are
+    still reported, so a genuinely bad id is still named rather than swallowed.
+    """
+    ids = [str(i or "").strip() for i in ids]
+    shipped = CAT._read_registry_file().get("models") or {}
+    models = DSC.merged_models()
+    overlay = DSC.load_overlay()
+    already = set(overlay.get("removed_models") or [])
+
+    results = {}
+    for mid in ids:
+        if not mid:
+            results[mid] = {"ok": False, "message": "empty model id"}
+        elif mid in models:
+            results[mid] = {"ok": True, "message": "removed"}
+        elif mid in already:
+            # Idempotent: the caller asked for a state, and that state holds.
+            results[mid] = {"ok": True, "message": "already hidden"}
+        else:
+            results[mid] = {"ok": False, "message": f"no model called {mid!r}"}
+
+    to_remove = [m for m, r in results.items() if r["ok"] and m in models]
+
+    def _apply(ov):
+        for mid in to_remove:
+            ov["models"].pop(mid, None)
+            if mid in shipped and mid not in ov["removed_models"]:
+                ov["removed_models"].append(mid)
+
+    if to_remove:
+        DSC.mutate_overlay(_apply)
+    return results, sum(1 for r in results.values() if r["ok"])
 
 
 def delete_model(mid):

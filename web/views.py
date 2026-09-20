@@ -210,15 +210,31 @@ function num(v, suffix) {{
   suffix = suffix || "";
   if (v === null || v === undefined)
     return '<span class="faint" title="unknown -- not measured, and not zero">&ndash;</span>';
-  if (typeof v === "number" && !Number.isInteger(v)) return v.toLocaleString() + suffix;
-  return Number(v).toLocaleString() + suffix;
+  // Mirrors the Python `num`: a float to ONE decimal, an integer with none.
+  // `toLocaleString` was used here and was wrong twice over -- it takes the
+  // decimal separator from the browser's locale, so a comma-decimal locale
+  // rendered 12.5 as "12,5" and disagreed with the report about the same
+  // number, and it does not fix the decimal count Python forces.
+  if (typeof v === "number" && !Number.isInteger(v))
+    return group(Number(v), 1) + suffix;
+  return group(Number(v), 0) + suffix;
 }}
 function money(v, known) {{
   if (v === null || v === undefined || !known)
     return '<span class="faint" title="price unknown for this model -- cost is NOT '
       + 'zero, it is unmeasured">unknown</span>';
-  return "$" + Number(v).toLocaleString(undefined,
-    {{minimumFractionDigits:3, maximumFractionDigits:3}});
+  // Three decimals and ',' grouping, matching the Python `f"${{v:,.3f}}"`.
+  return "$" + group(Number(v), 3);
+}}
+// Format with a fixed number of decimals and comma grouping, independent of
+// locale. Python's `,` format spec and `toLocaleString` disagree about both the
+// separator and the decimal count; this is the one place that difference is
+// resolved, so both halves of the UI print a number the same way.
+function group(n, decimals) {{
+  const neg = n < 0;
+  const parts = Math.abs(n).toFixed(decimals).split(".");
+  const ip = parts[0].replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ",");
+  return (neg ? "-" : "") + ip + (parts[1] ? "." + parts[1] : "");
 }}
 function ci(c) {{
   if (!c || c[0] === null || c[0] === undefined)
@@ -388,6 +404,22 @@ function addFieldTips(root) {{
     q.title = txt;
     l.appendChild(q);
   }});
+}}
+
+// Bind a handler to a view container, REPLACING any previous one of the same
+// type.
+//
+// A view that re-renders itself calls `RENDER.x(v)` on the SAME element, so a
+// bare `v.addEventListener` adds a second handler, then a third, and so on.
+// One click then fires N times: the user gets N confirmation dialogs, and after
+// the first handler has deleted the row the remaining N-1 run against something
+// that no longer exists and report failures. That was the "why must I click OK
+// five times, and why did the delete not work" bug.
+function bind(v, type, fn) {{
+  const key = "__bound_" + type;
+  if (v[key]) v.removeEventListener(type, v[key]);
+  v[key] = fn;
+  v.addEventListener(type, fn);
 }}
 
 function show(name) {{
@@ -731,7 +763,7 @@ RENDER.providers = async function (v) {{
   v.innerHTML = html;
   renderProbeDetail();
 
-  v.addEventListener("click", async (ev) => {{
+  bind(v, "click", async (ev) => {{
     const b = ev.target.closest("button[data-act]");
     if (!b) return;
     const act = b.dataset.act;
@@ -992,7 +1024,7 @@ RENDER.models = async function (v) {{
   $("#only-frames").addEventListener("change", e => {{ onlyFrames = e.target.checked; draw(); }});
 
   // Tick / untick -- delegated so re-renders keep working.
-  v.addEventListener("change", (ev) => {{
+  bind(v, "change", (ev) => {{
     const s = ev.target.closest("input[data-sel]");
     if (s) {{
       if (s.checked) sel.add(s.dataset.sel); else sel.delete(s.dataset.sel);
@@ -1007,7 +1039,7 @@ RENDER.models = async function (v) {{
     }}
   }});
 
-  v.addEventListener("click", async (ev) => {{
+  bind(v, "click", async (ev) => {{
     const b = ev.target.closest("button[data-act]");
     if (!b) return;
     const act = b.dataset.act;
@@ -1016,7 +1048,7 @@ RENDER.models = async function (v) {{
       LAUNCH.defaultProvider = b.dataset.p;
       show("launch");
     }} else if (act === "edit-model") {{
-      editModelForm(all.find(m => m.id === b.dataset.m));
+      editModelForm(all.find(m => m.id === b.dataset.m), reg.providers);
     }} else if (act === "del-model") {{
       if (!confirm("Remove model \\"" + b.dataset.m + "\\" from your table?\\n\\n"
         + "A tombstone is written to your overlay. The shipped registry file is "
@@ -1029,7 +1061,7 @@ RENDER.models = async function (v) {{
         RENDER.models(v);
       }} catch (e) {{ toast(e.message, "bad"); }}
     }} else if (act === "new-model") {{
-      newModelForm();
+      newModelForm(reg.providers);
     }} else if (act === "batch-use") {{
       const ids = Array.from(sel);
       const first = all.find(m => m.id === ids[0]);
@@ -1043,23 +1075,29 @@ RENDER.models = async function (v) {{
     }} else if (act === "batch-del") {{
       const ids = Array.from(sel);
       if (!confirm("Remove " + ids.length + " model(s) from your table?\\n\\n"
-        + "Tombs written to your overlay. The shipped registry file is not "
-        + "modified.")) return;
-      let ok = 0, bad = 0, firstErr = "";
-      for (const id of ids) {{
-        try {{
-          await api("/api/model/delete", {{ method: "POST",
-            headers: {{"Content-Type": "application/json"}},
-            body: JSON.stringify({{ id: id }}) }});
-          ok++;
-        }} catch (e) {{ bad++; if (!firstErr) firstErr = e.message; }}
+        + "A tombstone is written to your overlay file for each one. The "
+        + "shipped registry in the repository is not modified.")) return;
+      b.disabled = true;
+      try {{
+        // ONE request for the whole selection. This used to POST per model,
+        // and each of those rewrote the entire overlay file -- so a batch of
+        // thirteen meant thirteen rewrites and thirteen chances for one to
+        // fail, which is what produced a wall of errors for a single action.
+        const r = await api("/api/models/delete", {{ method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{ ids: ids }}) }});
+        const failed = Object.keys(r.failed || {{}});
+        toast(r.n_ok + " of " + r.n_total + " removed"
+          + (failed.length ? " \\u00b7 " + failed.length + " failed: "
+              + r.failed[failed[0]] : ""),
+          failed.length ? "bad" : "good");
+      }} catch (e) {{
+        toast("Could not remove those models: " + e.message, "bad");
+      }} finally {{
+        b.disabled = false;
+        sel.clear();
+        RENDER.models(v);
       }}
-      // One summary line, not one toast per model: a batch of twenty is one
-      // action, and twenty toasts is not a report.
-      toast(ok + " removed" + (bad ? ", " + bad + " failed: " + firstErr : ""),
-        bad ? "bad" : "good");
-      sel.clear();
-      RENDER.models(v);
     }} else if (act === "batch-clear") {{
       sel.clear();
       draw();
@@ -1345,17 +1383,26 @@ RENDER.results = async function (v) {{
   // throws the whole view away -- which is exactly what it used to do here.
   const clean = (runs.runs || []).filter(r => r.status === "success");
   const bad = (runs.runs || []).filter(r => r.status !== "success");
+  // Runs whose artifacts are committed to git are shipped reference material,
+  // not output this machine produced. The server refuses to delete them, so the
+  // UI must not offer to: a button that always fails is worse than no button,
+  // and a button that succeeds deletes a committed artifact. (It did.)
+  const deletable = bad.filter(r => !r.tracked);
+  const nTracked = bad.length - deletable.length;
 
   let html = '<h1>Results</h1>'
     + '<div class="toolbar">'
     + '<button class="btn" data-act="exp-csv">Export CSV</button>'
     + '<button class="btn" data-act="exp-json">Export JSON</button>'
-    + (bad.length
+    + (deletable.length
         ? '<button class="btn danger" data-act="del-incomplete">Delete '
-          + bad.length + ' incomplete run(s)</button>'
+          + deletable.length + ' incomplete run(s)</button>'
         : '')
     + '<span class="tiny dim" style="margin-left:auto">Exports cover every run, '
-    + 'clean and excluded, exactly as listed.</span></div>'
+    + 'clean and excluded, exactly as listed.'
+    + (nTracked ? ' ' + nTracked + ' committed reference artifact(s) are never '
+        + 'deleted by the button above.' : '')
+    + '</span></div>'
     + '<div class="dim" style="margin:4px 0 16px">'
     + 'Every run in <code>' + esc(runs.dir || "results") + '</code>, clean and '
     + 'excluded, with log health.</div>';
@@ -1392,14 +1439,20 @@ RENDER.results = async function (v) {{
 
   if (bad.length) {{
     const rows = bad.map(r => '<tr>'
-      + '<td class="model-cell"><a href="/run/' + esc(r.run_id) + '">' + esc(r.run_id) + '</a></td>'
+      + '<td class="model-cell"><a href="/run/' + esc(r.run_id) + '">' + esc(r.run_id) + '</a>'
+      + (r.tracked ? ' <span class="tag info" title="This run is tracked by '
+          + 'git: it is a shipped reference artifact, not output this machine '
+          + 'produced. The server will not delete it.">committed</span>' : '')
+      + '</td>'
       + '<td>' + esc(r.model) + '</td>'
       + '<td>' + tag(r.status, "err") + '</td>'
       + '<td class="tiny">' + esc((r.status_note || "").slice(0, 110)) + '</td>'
       + '<td class="num tiny">' + (r.n_turns === null ? dash(null) : r.n_turns) + '</td>'
       + '<td class="right nowrap">'
       + '<button class="lnk" data-act="exp-run" data-run="' + esc(r.run_id) + '">export</button>'
-      + ' <button class="lnk danger" data-act="del-run" data-run="' + esc(r.run_id) + '">delete</button>'
+      + (r.tracked ? '' :
+          ' <button class="lnk danger" data-act="del-run" data-run="'
+          + esc(r.run_id) + '">delete</button>')
       + '</td></tr>').join("");
     html += panel("Not results (" + bad.length + ")",
       "excluded from every ranking",
@@ -1410,7 +1463,7 @@ RENDER.results = async function (v) {{
   }}
 
   v.innerHTML = html;
-  v.addEventListener("click", async ev => {{
+  bind(v, "click", async ev => {{
     const b = ev.target.closest("button[data-act]");
     if (!b) return;
     const act = b.dataset.act;
@@ -1451,31 +1504,37 @@ RENDER.results = async function (v) {{
         if (/no files|still in progress/i.test(why)) RENDER.results(v);
       }}
     }} else if (act === "del-incomplete") {{
-      const ids = bad.map(r => r.run_id);
+      const ids = deletable.map(r => r.run_id);
       if (!ids.length) {{ toast("nothing incomplete to delete", "bad"); return; }}
       if (!confirm("Delete all " + ids.length + " run(s) that did not finish "
         + "cleanly?\\n\\nThese are the runs listed under \\u201cNot results\\u201d "
         + "-- interrupted, errored, or never summarised. Their files are removed "
-        + "from disk and cannot be recovered. Clean runs are untouched.")) return;
-      let ok = 0, skipped = 0;
-      const failed = [];
-      for (const id of ids) {{
-        try {{
-          await api("/api/run/delete", {{ method: "POST",
-            headers: {{"Content-Type": "application/json"}},
-            body: JSON.stringify({{ run_id: id }}) }});
-          ok++;
-        }} catch (e) {{
-          const why = (e && e.body && (e.body.error || e.body.detail))
-            || e.message;
-          if (/still in progress/i.test(why)) {{ skipped++; }}
-          else failed.push(id);
-        }}
+        + "from disk and cannot be recovered. Clean runs are untouched."
+        + (nTracked ? "\\n\\n" + nTracked + " committed reference artifact(s) "
+            + "are left alone -- git tracks them, so they are shipped material "
+            + "rather than output from this machine." : ""))) return;
+      b.disabled = true;
+      const oldText = b.textContent;
+      b.textContent = "deleting\\u2026";
+      try {{
+        // ONE request for the whole selection. This used to POST per run, so a
+        // sweep of twenty runs meant twenty round trips and twenty directory
+        // scans, and any one of them failing left the rest done and the user
+        // looking at an error.
+        const r = await api("/api/runs/prune", {{ method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{ ids: ids, dry_run: false }}) }});
+        const rep = r.report || {{}};
+        const skipped = (rep.skipped || []).filter(s => s.reason === "still running");
+        toast((rep.n_deleted || 0) + " deleted"
+          + (skipped.length ? " \\u00b7 " + skipped.length + " skipped (still running)" : "")
+          + ((rep.failed || []).length ? " \\u00b7 " + rep.failed.length + " failed" : ""),
+          (rep.failed || []).length ? "bad" : "good");
+      }} catch (e) {{
+        b.disabled = false;
+        b.textContent = oldText;
+        toast("Could not delete the incomplete runs: " + e.message, "bad");
       }}
-      const msg = ok + " deleted"
-        + (skipped ? " \\u00b7 " + skipped + " skipped (still running)" : "")
-        + (failed.length ? " \\u00b7 " + failed.length + " failed" : "");
-      toast(msg, failed.length ? "bad" : "good");
       RENDER.results(v);
     }}
   }});
@@ -1649,7 +1708,7 @@ RENDER.logs = async function (v) {{
   if (qEl) {{
     qEl.addEventListener("input", e => {{ LS.q = e.target.value; paintAll(); }});
   }}
-  v.addEventListener("click", async ev => {{
+  bind(v, "click", async ev => {{
     const lv = ev.target.closest("button[data-level]");
     if (lv) {{
       LS.level = lv.dataset.level;
@@ -2061,7 +2120,7 @@ RENDER.storyboard = async function (v) {{
   }}).join("");
   html += '<div class="sb-grid">' + cards + '</div>';
   v.innerHTML = html;
-  v.addEventListener("click", e => {{
+  bind(v, "click", e => {{
     const b = e.target.closest("button[data-run]"); if (!b) return;
     REPLAY_RUN = b.dataset.run; show("replays");
   }});
@@ -2208,7 +2267,32 @@ function editProviderForm(p) {{
     }});
 }}
 
-function newModelForm() {{
+// A provider picker, not a text box. The name has to match a configured
+// provider exactly, and `validate_model` refuses anything else -- so a free-text
+// field meant a typo produced "no provider called 'interlm' is configured" and
+// the user had to guess the spelling. A select cannot be misspelled.
+function providerOptions(providers, selected) {{
+  return '<option value="">(none recorded)</option>'
+    + (providers || []).map(p =>
+        '<option value="' + esc(p.name) + '"'
+        + (p.name === selected ? " selected" : "") + '>'
+        + esc(p.name) + (p.has_key ? "" : "  (no key)") + '</option>').join("");
+}}
+
+function priceFields(pin, pout) {{
+  // Two fields, because there are two prices. The add form previously had one
+  // input labelled "Price in / out" and sent `price_out` as a hardcoded null,
+  // so a manually added model could never have a known cost -- every run on it
+  // reported cost as unmeasured, whatever the user typed.
+  return '<label class="f"><span class="l">Price in /1K (USD)</span>'
+    + '<input id="m-pin" type="number" step="0.0001" min="0" value="'
+    + (pin === null || pin === undefined ? "" : pin) + '" placeholder="blank = unknown"></label>'
+    + '<label class="f"><span class="l">Price out /1K (USD)</span>'
+    + '<input id="m-pout" type="number" step="0.0001" min="0" value="'
+    + (pout === null || pout === undefined ? "" : pout) + '" placeholder="blank = unknown"></label>';
+}}
+
+function newModelForm(providers) {{
   modal("Add a model",
     '<div class="note info">Leave a field blank to record it as <b>unknown</b>. '
     + 'That is the correct choice when you have not checked: a zero context '
@@ -2217,16 +2301,15 @@ function newModelForm() {{
     + '<label class="f"><span class="l">Model id</span>'
     + '<input id="m-id" class="mono" placeholder="as the provider spells it"></label>'
     + '<label class="f"><span class="l">Provider</span>'
-    + '<input id="m-prov" class="mono" placeholder="must match a provider name"></label>'
+    + '<select id="m-prov">' + providerOptions(providers, "") + '</select></label>'
     + '</div>'
     + '<div class="grid3">'
     + '<label class="f"><span class="l">Context window</span>'
     + '<input id="m-ctx" type="number" min="1" placeholder="tokens"></label>'
     + '<label class="f"><span class="l">Max output</span>'
     + '<input id="m-out" type="number" min="1" placeholder="tokens"></label>'
-    + '<label class="f"><span class="l">Price in / out per 1K</span>'
-    + '<input id="m-pin" type="number" step="0.0001" placeholder="USD"></label>'
     + '</div>'
+    + '<div class="grid2">' + priceFields(null, null) + '</div>'
     + '<label class="f"><span class="l">Capabilities</span></label>'
     + capChecks([], "m")
     + '<label class="f" style="margin-top:11px"><span class="l">Source</span>'
@@ -2244,7 +2327,7 @@ function newModelForm() {{
           context_window: intOrNull($("#m-ctx", body).value),
           max_output: intOrNull($("#m-out", body).value),
           price_in: floatOrNull($("#m-pin", body).value),
-          price_out: floatOrNull($("#m-out", body).value) ? null : null,
+          price_out: floatOrNull($("#m-pout", body).value),
           capabilities: caps.length ? caps : null,
           capability_source: caps.length ? "manual" : null,
           source: $("#m-src", body).value.trim() || null,
@@ -2256,20 +2339,25 @@ function newModelForm() {{
     }});
 }}
 
-function editModelForm(m) {{
+function editModelForm(m, providers) {{
   if (!m) return;
   modal("Edit " + m.id,
     '<div class="note">Blank means unknown. Editing writes an override to your '
     + 'overlay; the shipped table is untouched.</div>'
-    + '<div class="grid3" style="margin-top:12px">'
+    + '<label class="f" style="margin-top:12px"><span class="l">Provider</span>'
+    + '<select id="m-prov">' + providerOptions(providers, m.provider || "")
+    + '</select>'
+    + '<span class="h">Which provider serves this model. Changing it re-files '
+    + 'the model under the new provider; a name that is not configured cannot '
+    + 'be selected, which is why this is a list rather than a text box.</span>'
+    + '</label>'
+    + '<div class="grid3">'
     + '<label class="f"><span class="l">Context window</span>'
     + '<input id="m-ctx" type="number" value="' + (m.context_window || "") + '"></label>'
     + '<label class="f"><span class="l">Max output</span>'
     + '<input id="m-out" type="number" value="' + (m.max_output || "") + '"></label>'
-    + '<label class="f"><span class="l">Price in /1K</span>'
-    + '<input id="m-pin" type="number" step="0.0001" value="'
-    + (m.price_in === null || m.price_in === undefined ? "" : m.price_in) + '"></label>'
     + '</div>'
+    + '<div class="grid2">' + priceFields(m.price_in, m.price_out) + '</div>'
     + '<label class="f"><span class="l">Capabilities</span></label>'
     + capChecks(m.capabilities)
     + '<label class="f" style="margin-top:11px"><span class="l">Notes</span>'
@@ -2279,10 +2367,11 @@ function editModelForm(m) {{
       await api("/api/model", {{ method: "POST",
         headers: {{"Content-Type": "application/json"}},
         body: JSON.stringify({{
-          id: m.id, provider: m.provider,
+          id: m.id, provider: $("#m-prov", body).value.trim() || null,
           context_window: intOrNull($("#m-ctx", body).value),
           max_output: intOrNull($("#m-out", body).value),
           price_in: floatOrNull($("#m-pin", body).value),
+          price_out: floatOrNull($("#m-pout", body).value),
           capabilities: caps.length ? caps : null,
           capability_source: "manual",
           notes: $("#m-notes", body).value.trim() || null,
@@ -2393,7 +2482,7 @@ RENDER.settings = async function (v) {{
 
   // One delegated handler for every control, so a setting added above cannot
   // be forgotten here.
-  v.addEventListener("change", async e => {{
+  bind(v, "change", async e => {{
     const el = e.target.closest("[data-set]");
     if (!el) return;
     const key = el.dataset.set;

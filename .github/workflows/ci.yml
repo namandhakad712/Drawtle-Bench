@@ -45,6 +45,23 @@ jobs:
       - name: Accounting and provider registry (token split, any-provider)
         run: python analysis/test_hosted_and_accounting.py
 
+      - name: Control-centre HTTP surface (every route, incl. the ones that write)
+        run: python analysis/test_control_centre.py
+
+      - name: Dashboard JS parses (node --check on the emitted <script>)
+        run: python analysis/check_dashboard_js.py
+
+      - name: View-helper parity (Python and JS must format numbers identically)
+        run: python analysis/test_view_helpers.py
+
+      - name: Install Playwright Chromium
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Dashboard browser smoke test (every tab in real Chromium)
+        run: python analysis/test_dashboard_browser.py
+
       - name: Docker image consistency (does the image contain what bench.py imports?)
         run: python analysis/check_docker.py
 
@@ -53,3 +70,51 @@ jobs:
 
       - name: Lint the built site
         run: python docs/lint.py
+
+  # The image is the OS-level envelope for the whole isolation claim, and until
+  # this job existed nothing ever built it: `check_docker.py` compares COPY lines
+  # against bench.py's imports, which is a static check and cannot prove the
+  # image builds or that a run inside it works. Three Dockerfile defects had
+  # already been found by reading rather than running.
+  #
+  # Runs on pushes to the default branch only. Building is the expensive part and
+  # the Dockerfile changes rarely; a merge is the moment it matters.
+  docker-smoke:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build the image
+        run: docker build -t drawtle-bench -f docker/Dockerfile .
+
+      - name: Generate a small dataset for the in-container run
+        run: |
+          docker run --rm -v "$PWD/results:/bench/results" drawtle-bench \
+            generate --count 5 --sizes 9 --seed 7 --out results/docker-ci.json
+
+      - name: Run the mock inside the container
+        run: |
+          docker run --rm -v "$PWD/results:/bench/results" \
+            -e DRAWTLE_IN_SANDBOX=1 drawtle-bench \
+            run --backend mock --model mock --mode optimal \
+            --dataset results/docker-ci.json --out-dir results \
+            --run-id docker-ci --limit 5
+
+      - name: Assert the container run succeeded and recorded its isolation
+        run: |
+          python - <<'PY'
+          import json, sys
+          from drawtle import runstate as RS
+          p = RS.run_paths("results", "docker-ci")["status"]
+          rec = json.load(open(p, encoding="utf-8"))
+          print("status :", rec.get("status"))
+          print("sandbox:", rec.get("sandbox"), rec.get("sandbox_note") or "")
+          if rec.get("status") != "success":
+              sys.exit(f"the in-container run did not succeed: {rec.get('status')}")
+          if not rec.get("sandbox"):
+              sys.exit("the run recorded no isolation level")
+          PY

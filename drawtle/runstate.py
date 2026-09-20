@@ -38,6 +38,7 @@ Design rules
 import json
 import os
 import re
+import threading
 import time
 
 STATUS_STARTED = "started"
@@ -301,16 +302,32 @@ def atomic_write_json(path, obj):
     `open(path, "w")` truncates immediately, so there is a window in which the
     file exists and is empty. A dashboard polling the results directory during
     a run hits that window routinely; here it cannot.
+
+    The temp name carries the pid and thread id. A fixed `<path>.tmp` is a
+    predictable name, so two writers -- the control centre serves requests on a
+    thread per connection, and a run may be resumed while a dashboard is
+    reading -- can open the same temp file and interleave into one corrupt
+    document, which `os.replace` then publishes atomically. A unique name costs
+    nothing and removes the race entirely.
     """
     parent = os.path.dirname(os.path.abspath(path))
     if parent:
         os.makedirs(parent, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(obj, fh, indent=2)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(obj, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        # Never leave a stray temp file behind on a failure path -- a `.tmp`
+        # next to a run's artifacts looks like a half-written result.
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return path
 
 

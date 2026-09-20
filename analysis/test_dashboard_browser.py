@@ -145,6 +145,38 @@ def main():
                 "() => document.querySelectorAll('#view label.f').length")
             check("every launch field has a tooltip",
                   fields > 0 and tips == fields, f"{tips} tooltips / {fields} fields")
+
+            # ONE click must raise ONE confirmation dialog, every time.
+            #
+            # A view that re-renders itself calls RENDER.x(v) on the SAME
+            # element, so a bare addEventListener stacks another handler each
+            # time and the Nth click fires N dialogs. The user had to dismiss
+            # the same dialog five or six times, and because the first handler
+            # deleted the row while the rest ran against it afterwards, the
+            # delete looked like it had failed.
+            #
+            # The dialog is ACCEPTED, not dismissed: dismissing it makes the
+            # handler return early, so nothing re-renders and no handler ever
+            # stacks -- a version of this test that dismissed passed happily
+            # with the bug in place. The providers live in a throwaway overlay
+            # (see the top of this file), so deleting a few is safe.
+            dialogs = []
+            pg.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
+            pg.click('nav.tabs button[data-view="providers"]')
+            pg.wait_for_selector("#view table")
+            per_click = []
+            for _ in range(3):
+                before = len(dialogs)
+                btn = pg.query_selector('#view button[data-act="del-provider"]')
+                if not btn:
+                    break
+                btn.click()
+                pg.wait_for_timeout(900)   # let the POST land and the view redraw
+                per_click.append(len(dialogs) - before)
+            check("each delete click raises exactly one confirmation",
+                  len(per_click) >= 2 and all(n == 1 for n in per_click),
+                  f"dialogs per click: {per_click} (a rising count means "
+                  f"handlers are stacking on the same element)")
             br.close()
     finally:
         httpd.shutdown()

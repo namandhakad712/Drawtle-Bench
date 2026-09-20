@@ -38,6 +38,7 @@
 <a href="changelog.html" class="on">Changelog</a>
 <a href="contributing.html">Contributing</a>
 <div class="grp">On this page</div><div class="toc">
+<a href="#v2.7.1-the-audit-findings-verified-and-fixed">v2.7.1 — the audit findings, verified and fixed</a>
 <a href="#v2.7.0-operability-per-session-folders-testlive-provenance-settings-and-a-doctor">v2.7.0 — operability: per-session folders, test/live provenance, settings, and a doctor</a>
 <a href="#v2.6.0-control-centre-live-provider-discovery-and-the-models-imported-from-two-agent-harnesses">v2.6.0 — control centre, live provider discovery, and the models imported from two agent harnesses</a>
 <a href="#v2.5.0-provider-agnostic-backends-correct-token-accounting-cost-per-session">v2.5.0 — provider-agnostic backends, correct token accounting, cost per session</a>
@@ -54,6 +55,66 @@
 </nav>
 <main id="content">
 <h1 id="changelog">Changelog<a class="ah" href="#changelog" aria-label="link">#</a></h1>
+<h2 id="v2.7.1-the-audit-findings-verified-and-fixed">v2.7.1 — the audit findings, verified and fixed<a class="ah" href="#v2.7.1-the-audit-findings-verified-and-fixed" aria-label="link">#</a></h2>
+<h3 id="also-in-this-release-the-control-panels-own-defects-found-by-using-it">Also in this release: the control panel's own defects, found by using it<a class="ah" href="#also-in-this-release-the-control-panels-own-defects-found-by-using-it" aria-label="link">#</a></h3>
+<p>Reported from the running dashboard. All four were real.</p>
+<ul>
+<li>
+<strong>Bulk delete fired one request per item, and every request rewrote the whole overlay file.</strong> Deleting thirteen models meant thirteen round trips, thirteen read-modify-write cycles with an fsync each, and thirteen independent chances for one to fail — which is what produced a wall of errors for a single action. There is now a batch endpoint (<code>POST /api/models/delete</code>) that takes the whole selection and does <strong>one</strong> atomic write, reporting per-id outcomes so a genuinely bad id is still named. The same treatment for runs: the Results view's "delete incomplete runs" is one request, not one per run.
+</li>
+<li>
+<strong>The confirmation dialog appeared once per stacked handler.</strong> A view that re-renders itself calls <code>RENDER.x(v)</code> on the <em>same</em> element, and a bare <code>addEventListener</code> added another handler every time — so the Nth click fired N handlers and raised N dialogs, and after the first handler had deleted the row the rest ran against something that no longer existed and reported failures. That is why a delete had to be confirmed five or six times and then looked like it had not worked. Handlers are now bound through <code>bind()</code>, which replaces the previous one. The regression test that guards this was itself wrong at first (it dismissed the dialog, so nothing re-rendered and no handler ever stacked); it is now verified to catch the bug, which it reports as <code>[1, 2, 4]</code> dialogs per click.
+</li>
+<li>
+<strong>A model's provider could not be changed.</strong> The edit form had no provider field at all — it sent the model's existing value back, so the field could never differ. It now has a provider selector, and <code>save_model</code> can clear one (choosing "(none)" previously sent <code>None</code>, which the merge treated as "not sent", so the old provider silently stayed).
+</li>
+<li>
+<strong>The add-model form could never record an output price.</strong> It had one input labelled "Price in / out" and sent <code>price_out</code> as a hardcoded <code>null</code> — reading the <em>max output</em> field to decide. Every manually added model therefore had <code>price_known: false</code> and every run on it reported cost as unmeasured, whatever the user typed. Two fields now, and the provider is a picker rather than a text box (a typo used to be rejected with "no provider called 'interlm' is configured", which is what made adding a model feel like guesswork).
+</li>
+<li>
+<strong>The dashboard offered to delete committed reference artifacts.</strong> <code>mock-opt</code> and <code>mock-stale</code> are the floor-check pair; they have no status file, so by the project's own rule they are "not results" and the "delete incomplete runs" button swept them up. Clicking it deleted four committed files. A run whose artifacts git tracks is now detected (<code>tracked_runs</code>), marked <code>committed</code> in the table, excluded from the bulk action, and <strong>refused by the retention sweep</strong> — a shipped reference is not output this machine produced. The four files were restored from git.
+</li>
+</ul>
+<h3 id="the-audit-findings">The audit findings<a class="ah" href="#the-audit-findings" aria-label="link">#</a></h3>
+<p>An external read-only audit (<code>BETTERMENT-REPORT.MD</code>) raised nine items. Each was checked against the code before anything was changed; the ones below were confirmed and are fixed here. Two of its claims were right about the code and wrong about the severity, and one was a design point rather than a defect — noted at the end rather than silently dropped.</p>
+<ul>
+<li>
+<strong><code>by_size</code> was reporting <code>by_pair</code>.</strong> <code>_turn_rec</code> wrote <code>"size": spec["pair"]</code>, so every per-turn record carried the exit-pair string in its <code>size</code> field, and <code>measures.by_dimension(records, "size")</code> grouped on it. The <code>by_size</code> table in every report and summary was therefore a duplicate of <code>by_pair</code> — a table labelled "9×9 vs 11×11 vs 13×13" that was actually "NW vs WS vs SE". The episode summary wrote <code>spec["size"]</code> correctly, which is why nothing looked wrong from the outside. One token, and a regression test that pins the contract from both ends: the record writer, and the grouping that consumes it.
+</li>
+<li>
+<strong>The dashboard and the report disagreed about the same number.</strong> The five formatting helpers are implemented twice (Python for the server-rendered report pages, JS for the single-page dashboard), and the JS copies used <code>toLocaleString</code>. That is wrong twice over: it takes the decimal separator from the <em>browser's</em> locale, so a comma-decimal locale rendered <code>12.5</code> as <code>12,5</code>; and it does not fix the decimal count that the Python version forces, so <code>num(12.55)</code> was <code>12.6</code> in the report and <code>12.55</code> on the dashboard. Both helpers now format explicitly through one <code>group()</code> function, independent of locale.
+</li>
+<li>
+<strong><code>analysis/test_view_helpers.py</code> (new)</strong> runs both implementations over the same 24 inputs and compares the output, then asserts the invariant directly — an unknown renders as a marker, a real zero renders as <code>0</code>. Comparing the two is not enough on its own: two implementations can agree on the wrong answer. <strong>It found the <code>money</code>/<code>num</code> drift on its first run.</strong>
+</li>
+<li>
+<strong><code>atomic_write_json</code> used a predictable temp filename</strong> (<code>&lt;path&gt;.tmp</code>). Two writers — the control centre serves a thread per connection, and a run can be resumed while a dashboard reads — could open the same temp file, interleave into one corrupt document, and publish it atomically with <code>os.replace</code>. The name now carries the pid and thread id, and a failure path removes it rather than leaving a <code>.tmp</code> beside a run's artifacts.
+</li>
+<li>
+<strong>The <code>image_b64</code> parameter was dead on every backend</strong> and actively misleading: it was a second way to inject an image that nothing ever called, so a reader would reasonably assume it was doing something and a refactor could silently drop the real path. Removed from all three <code>_post</code> methods; the message path is the only one, and it is the one <code>test_vision_wiring.py</code> proves.
+</li>
+<li>
+<strong>The transcript's integrity claim was too strong.</strong> Each pool entry carries a hash of its own content, and the error said the transcript "has been modified and cannot be trusted". But the hash lives inside the object it protects, so anything able to rewrite an entry can recompute its hash. The guarantee is corruption-detection, not tamper-proofing, and the docstring and the message now say so. A hash that survives a hostile edit needs to be recorded in a separate artifact with a different lifecycle — recommended, not done.
+</li>
+<li>
+<strong>CI did not run the dashboard at all.</strong> <code>test_control_centre.py</code>, <code>test_dashboard_browser.py</code>, <code>check_dashboard_js.py</code> and the new parity test are now in the workflow; the browser suite installs Chromium. A dashboard that breaks in a way no test covers is a dashboard that breaks in front of a user.
+</li>
+<li>
+<strong>A new <code>docker-smoke</code> job builds the image and runs the mock inside it.</strong> The image is the OS-level envelope for the whole isolation claim, and nothing had ever built it — <code>check_docker.py</code> compares <code>COPY</code> lines against <code>bench.py</code>'s imports, which is a static check that cannot prove the image builds or that a run inside it works. Three Dockerfile defects had already been found by reading. It runs on pushes to the default branch only; building is the expensive part and the Dockerfile changes rarely.
+</li>
+</ul>
+<p>Not changed, and why:</p>
+<ul>
+<li>
+<strong>Unbounded conversation history</strong> is real and the audit is right about its consequences, but the audit also says the current design <em>is</em> the experiment ("does the model remember when forced to?"). Adding a history cap changes what is being measured, so it needs a configurable mode rather than a default — planned, not slipped in.
+</li>
+<li>
+<strong><code>docker/sandbox.md</code></strong> claimed Layer 2 was run-tested without evidence. That claim is now backed by the <code>docker-smoke</code> job, so the doc is correct rather than corrected.
+</li>
+<li>
+<strong><code>web/views.py</code> as a 2,400-line module</strong> is a maintenance observation, not a defect. The parity test now guards the part of it that is a correctness invariant.
+</li>
+</ul>
 <h2 id="v2.7.0-operability-per-session-folders-testlive-provenance-settings-and-a-doctor">v2.7.0 — operability: per-session folders, test/live provenance, settings, and a doctor<a class="ah" href="#v2.7.0-operability-per-session-folders-testlive-provenance-settings-and-a-doctor" aria-label="link">#</a></h2>
 <ul>
 <li>
