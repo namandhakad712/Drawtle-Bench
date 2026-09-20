@@ -153,11 +153,11 @@ def save_provider(payload):
     spec, errs = validate_provider(payload, existing)
     if errs:
         return None, errs, 0
-    ov = DSC.load_overlay()
-    ov["providers"][name] = spec
-    if name in ov["removed_providers"]:
-        ov["removed_providers"].remove(name)     # re-adding clears the tombstone
-    DSC.save_overlay(ov)
+    def _apply(ov):
+        ov["providers"][name] = spec
+        if name in ov["removed_providers"]:
+            ov["removed_providers"].remove(name)  # re-adding clears the tombstone
+    DSC.mutate_overlay(_apply)
     # Discovery table is built at import; a new provider must appear in it now.
     CAT.DISCOVERY.update(CAT._load_discovery())
     n = len([m for m in DSC.merged_models().values()
@@ -175,13 +175,13 @@ def delete_provider(name):
     providers = DSC.merged_providers()
     if name not in providers:
         return False, f"no provider called {name!r}", False
-    ov = DSC.load_overlay()
-    ov["providers"].pop(name, None)
     shipped = bool(CAT._read_registry_file().get("providers", {}).get(name))
-    if shipped:
-        if name not in ov["removed_providers"]:
+
+    def _apply(ov):
+        ov["providers"].pop(name, None)
+        if shipped and name not in ov["removed_providers"]:
             ov["removed_providers"].append(name)
-    DSC.save_overlay(ov)
+    DSC.mutate_overlay(_apply)
     CAT.DISCOVERY.pop(name, None)
     return True, ("hidden; the shipped entry is untouched in the repository"
                   if shipped else "removed"), shipped
@@ -189,12 +189,13 @@ def delete_provider(name):
 
 def reset_provider(name):
     """Drop a provider override, restoring the shipped entry."""
-    ov = DSC.load_overlay()
-    had = name in ov["providers"] or name in ov["removed_providers"]
-    ov["providers"].pop(name, None)
-    if name in ov["removed_providers"]:
-        ov["removed_providers"].remove(name)
-    DSC.save_overlay(ov)
+    def _apply(ov):
+        had = name in ov["providers"] or name in ov["removed_providers"]
+        ov["providers"].pop(name, None)
+        if name in ov["removed_providers"]:
+            ov["removed_providers"].remove(name)
+        return had
+    had = DSC.mutate_overlay(_apply)
     CAT.DISCOVERY.update(CAT._load_discovery())
     return had
 
@@ -290,18 +291,19 @@ def save_model(payload):
     if errs:
         return None, errs, []
     mid = str(payload["id"]).strip()
-    ov = DSC.load_overlay()
-    merged = dict(ov["models"].get(mid) or {})
-    # A patch: keys the caller did not send keep their current merged value.
-    for k, v in entry.items():
-        if v is not None or k in ("capabilities", "capability_source", "notes",
-                                  "price_in", "price_out", "context_window",
-                                  "max_output", "price_known"):
-            merged[k] = v
-    ov["models"][mid] = merged
-    if mid in ov["removed_models"]:
-        ov["removed_models"].remove(mid)
-    DSC.save_overlay(ov)
+
+    def _apply(ov):
+        merged = dict(ov["models"].get(mid) or {})
+        # A patch: keys the caller did not send keep their current merged value.
+        for k, v in entry.items():
+            if v is not None or k in ("capabilities", "capability_source", "notes",
+                                      "price_in", "price_out", "context_window",
+                                      "max_output", "price_known"):
+                merged[k] = v
+        ov["models"][mid] = merged
+        if mid in ov["removed_models"]:
+            ov["removed_models"].remove(mid)
+    DSC.mutate_overlay(_apply)
     return mid, [], []
 
 
@@ -310,13 +312,13 @@ def delete_model(mid):
     models = DSC.merged_models()
     if mid not in models:
         return False, f"no model called {mid!r}"
-    ov = DSC.load_overlay()
-    ov["models"].pop(mid, None)
     shipped = mid in (CAT._read_registry_file().get("models") or {})
-    if shipped:
-        if mid not in ov["removed_models"]:
+
+    def _apply(ov):
+        ov["models"].pop(mid, None)
+        if shipped and mid not in ov["removed_models"]:
             ov["removed_models"].append(mid)
-    DSC.save_overlay(ov)
+    DSC.mutate_overlay(_apply)
     return True, ("hidden; the shipped entry is untouched" if shipped
                   else "removed")
 

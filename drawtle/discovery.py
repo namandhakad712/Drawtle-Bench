@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -144,6 +145,10 @@ def _config_root():
 OVERLAY_DIR = os.path.join(_config_root(), "drawtle-bench")
 OVERLAY_FILE = os.path.join(OVERLAY_DIR, "overlay.json")
 
+#: Serialises overlay writes. Re-entrant so `mutate_overlay` can hold it across
+#: a read-modify-write while `save_overlay` re-acquires it for the write itself.
+_OVERLAY_LOCK = threading.RLock()
+
 #: Shape of an empty overlay. Written on first save so a reader never has to
 #: handle "file exists but is missing a key".
 _EMPTY = {
@@ -194,19 +199,26 @@ def save_overlay(blob):
     `OSError` escape: this runs inside an HTTP request, and the container this
     is meant to run in may have a read-only home directory. "Cannot write your
     edits here" is a state the UI can explain; a traceback is not.
+
+    The control centre serves requests on a thread per connection, so two
+    requests can reach this at once. Two writers sharing one temp filename
+    would interleave into a single corrupt file and then publish it with
+    `os.replace` -- so the temp name is made unique per writer, and the whole
+    write is serialised under `_OVERLAY_LOCK`.
     """
     blob = dict(blob)
     blob["version"] = 1
     blob["updated"] = time.time()
     blob["updated_iso"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
     try:
-        os.makedirs(OVERLAY_DIR, exist_ok=True)
-        tmp = OVERLAY_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(blob, fh, indent=2)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, OVERLAY_FILE)
+        with _OVERLAY_LOCK:
+            os.makedirs(OVERLAY_DIR, exist_ok=True)
+            tmp = f"{OVERLAY_FILE}.{os.getpid()}.{threading.get_ident()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(blob, fh, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, OVERLAY_FILE)
     except OSError as e:
         raise OverlayWriteError(
             f"could not write {OVERLAY_FILE} ({e.strerror or e.__class__.__name__}). "
@@ -215,6 +227,24 @@ def save_overlay(blob):
             f"XDG_CONFIG_HOME (POSIX) or APPDATA (Windows) to a writable path, "
             f"or edit drawtle/providers.json directly and rebuild.") from e
     return OVERLAY_FILE
+
+
+def mutate_overlay(fn):
+    """Apply `fn(overlay)` to the stored overlay and save it, under one lock.
+
+    A caller that does `ov = load_overlay(); ...; save_overlay(ov)` loses the
+    edit if a second request lands between the read and the write. Holding the
+    lock across the whole read-modify-write makes the sequence atomic, which is
+    what every overlay-editing endpoint actually wants. `fn` may return a value,
+    which is passed back to the caller.
+    """
+    with _OVERLAY_LOCK:
+        ov = load_overlay()
+        out = fn(ov)
+        # save_overlay takes the same re-entrant lock; the nesting is why it is
+        # an RLock rather than a Lock.
+        save_overlay(ov)
+        return out
 
 
 def merged_providers():
@@ -438,7 +468,11 @@ def probe(provider, spec=None, timeout=20.0):
         }.get(e.code, f"HTTP {e.code}")
         base["elapsed_ms"] = int((time.time() - t0) * 1000)
         return base
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
+    except TimeoutError as e:
+        base["error"] = f"timed out ({e})"
+        base["elapsed_ms"] = int((time.time() - t0) * 1000)
+        return base
+    except (urllib.error.URLError, OSError) as e:
         base["error"] = f"unreachable ({type(e).__name__})"
         base["elapsed_ms"] = int((time.time() - t0) * 1000)
         return base
@@ -495,7 +529,15 @@ def probe(provider, spec=None, timeout=20.0):
 
 
 def _get(url, key, auth, timeout):
-    """One GET, with the auth style this provider declares."""
+    """One GET, with the auth style this provider declares.
+
+    `urllib`'s `timeout` is a per-socket-operation timeout, not a wall-clock
+    deadline: a connection that stalls mid-TLS-handshake or mid-send never
+    trips it, and the call blocks forever. That is not a theoretical concern
+    here -- it is what made `/api/probe` hang the control centre when a
+    provider stopped answering. So the request runs on a daemon thread and the
+    caller enforces the deadline itself.
+    """
     if auth == "query" and key:
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}key={urllib.parse.quote(key)}"
@@ -510,8 +552,26 @@ def _get(url, key, auth, timeout):
                 req.add_header("Authorization", f"Bearer {key}")
     req.add_header("Accept", "application/json")
     req.add_header("User-Agent", "drawtle-bench/2.1 (+catalog discovery)")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+
+    box = {}
+
+    def _run():
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                box["ok"] = json.loads(r.read().decode())
+        except BaseException as e:                  # noqa: BLE001 - re-raised
+            box["err"] = e
+
+    th = threading.Thread(target=_run, daemon=True)
+    th.start()
+    th.join(timeout)
+    if "ok" in box:
+        return box["ok"]
+    if "err" in box:
+        raise box["err"]
+    raise TimeoutError(
+        f"no response within {timeout:.0f}s (connection opened but never "
+        f"completed -- the provider is unreachable or not answering)")
 
 
 def probe_all(providers=None, timeout=12.0):
@@ -552,34 +612,37 @@ def apply_probe_to_registry(results, only=None, keep_prices=True):
 
     Returns (n_written, overlay_path).
     """
-    ov = load_overlay()
     written = 0
-    for res in results:
-        if only is not None and res.get("provider") not in only:
-            continue
-        if not res.get("ok"):
-            continue
-        prov = res["provider"]
-        for m in res.get("models") or []:
-            entry = ov["models"].get(m["id"]) or {}
-            if m.get("context_source") == "api":
-                entry["context_window"] = m["context_window"]
-            if m.get("max_output") is not None:
-                entry["max_output"] = m["max_output"]
-            if m.get("capability_source") == "api":
-                entry["capabilities"] = m["capabilities"]
-            if not keep_prices and m.get("price_in") is not None:
-                entry["price_in"] = m["price_in"]
-                entry["price_out"] = m["price_out"]
-                entry["price_known"] = True
-            entry.setdefault("provider", prov)
-            entry["discovered"] = True
-            entry["discovered_at"] = time.strftime(
-                "%Y-%m-%dT%H:%M:%S", time.localtime())
-            entry["source"] = f"live discovery on {prov}"
-            ov["models"][m["id"]] = entry
-            written += 1
-    path = save_overlay(ov)
+
+    def _apply(ov):
+        nonlocal written
+        for res in results:
+            if only is not None and res.get("provider") not in only:
+                continue
+            if not res.get("ok"):
+                continue
+            prov = res["provider"]
+            for m in res.get("models") or []:
+                entry = ov["models"].get(m["id"]) or {}
+                if m.get("context_source") == "api":
+                    entry["context_window"] = m["context_window"]
+                if m.get("max_output") is not None:
+                    entry["max_output"] = m["max_output"]
+                if m.get("capability_source") == "api":
+                    entry["capabilities"] = m["capabilities"]
+                if not keep_prices and m.get("price_in") is not None:
+                    entry["price_in"] = m["price_in"]
+                    entry["price_out"] = m["price_out"]
+                    entry["price_known"] = True
+                entry.setdefault("provider", prov)
+                entry["discovered"] = True
+                entry["discovered_at"] = time.strftime(
+                    "%Y-%m-%dT%H:%M:%S", time.localtime())
+                entry["source"] = f"live discovery on {prov}"
+                ov["models"][m["id"]] = entry
+                written += 1
+
+    path = mutate_overlay(_apply)
     return written, path
 
 

@@ -46,7 +46,7 @@ import html
 import json
 import os
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from drawtle import catalog as CAT
 from drawtle import cost as CO
@@ -620,6 +620,14 @@ def _cached_rasteriser(FR):
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    # With HTTP/1.1 keep-alive a connection holds a worker thread until the
+    # browser closes it. The dashboard polls on a timer and opens several
+    # connections at once, so an idle socket must not pin a thread forever:
+    # after this many seconds of silence the socket is closed and the thread
+    # returns to the pool. It is a per-connection idle cap, not a request
+    # deadline -- a legitimately slow handler (a provider probe) still runs.
+    timeout = 65
+
     def __init__(self, *a, results_dir="results", supervisor=None, **kw):
         self.results_dir = results_dir
         self.sup = supervisor
@@ -659,16 +667,24 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/api/probe":
                 one = q.get("provider")
                 test_only = q.get("test_only") == "1"
+                # An optional deadline. The default is a real provider's, which
+                # is generous; a caller that just wants to know "is this host
+                # answering at all" can ask for less, and a test can keep its
+                # runtime bounded without stubbing the network.
+                try:
+                    probe_timeout = float(q.get("timeout") or 20.0)
+                except ValueError:
+                    return self._err("timeout must be a number of seconds", 400)
                 if one:
                     spec = DSC.merged_providers().get(one)
                     if spec is None:
                         return self._err(f"no provider called {one!r}", 404)
-                    data = DSC.probe(one, spec)
+                    data = DSC.probe(one, spec, timeout=probe_timeout)
                     if test_only:
                         data = {k: v for k, v in data.items() if k != "models"}
                     self._json(data)
                 else:
-                    self._json({"results": DSC.probe_all()})
+                    self._json({"results": DSC.probe_all(timeout=probe_timeout)})
             elif path.startswith("/run/") and path.count("/") == 2:
                 body, code = run_html(self.results_dir, path.split("/")[2])
                 self._send(body, code=code)
@@ -847,6 +863,18 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    # `_send` swallows a client that goes away mid-write. The same thing happens
+    # mid-read: a tab closed or a poll superseded leaves socketserver's
+    # `handle_one_request` recv() raising ConnectionAbortedError, which becomes a
+    # multi-page traceback in the console that buries real errors. It is expected
+    # client behaviour, not a bench fault -- drop it here and close the
+    # connection quietly.
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
+
 
 def _port_busy(host, port):
     """Is something already listening on (host, port)? Best-effort, no bind."""
@@ -871,9 +899,16 @@ def _startup_health(dir_):
     """
     import drawtle.frames as F
     import drawtle.dataset as D
+    global _SANDBOX_CACHE, _RASTER_CACHE
     print("── health check ─────────────────────────────────────────")
     try:
         rs = F.rasteriser_status(probe=True)
+        # Seed the cache with the result of this very probe. The first
+        # /api/system otherwise pays for it again (docker info plus a real
+        # rasterisation), which showed up as a multi-second first paint of the
+        # Overview tab. The work is already being done here -- throwing the
+        # answer away and recomputing it on the first request was pure waste.
+        _RASTER_CACHE = rs
         print(f"  rasteriser : {'OK  (' + str(rs.get('chromium') or 'cairosvg') + ')' if rs.get('usable') else 'MISSING -- framed runs will fail; pip install cairosvg or playwright'}")
     except Exception as e:                        # noqa: BLE001
         print(f"  rasteriser : CHECK FAILED ({type(e).__name__}: {e})")
@@ -888,6 +923,7 @@ def _startup_health(dir_):
     else:
         print(f"  dataset    : MISSING -- run `bench.py generate --out {os.path.relpath(dpath)}`")
     sbx = SBX.describe()
+    _SANDBOX_CACHE = sbx                           # same reasoning as above
     print(f"  sandbox    : {sbx['level']} -- {sbx['note']}")
     try:
         import drawtle.catalog as CAT
@@ -921,6 +957,34 @@ def _frames_cached(dir_):
     return sum(1 for _ in os.scandir(d))
 
 
+def make_server(dir_, host, port, supervisor=None):
+    """Build the control-centre HTTP server. One place, so `serve()` and the
+    tests cannot drift apart -- a test that builds its own single-threaded
+    server would pass while the real one deadlocked.
+
+    Threaded on purpose. The dashboard is not a sequence of independent page
+    loads: it fires several fetches at once on boot (system + runs + overlay),
+    polls a log view on a timer, and runs provider probes that talk to the
+    network. On a single-threaded server any one of those blocks every other
+    request behind it -- and a probe to a provider that has stopped answering
+    blocked them permanently, which is what left the Overview tab spinning on
+    "loading" with no error in the console. One thread per connection removes
+    the whole class of failure. daemon_threads lets Ctrl-C stop the server even
+    with connections open; allow_reuse_address avoids a TIME_WAIT bind refusal
+    when the dashboard is restarted straight away.
+    """
+    sup = supervisor if supervisor is not None else SUP.Supervisor(results_dir=dir_)
+
+    class _Server(ThreadingHTTPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+    httpd = _Server(
+        (host, port),
+        lambda *a, **kw: _Handler(*a, results_dir=dir_, supervisor=sup, **kw))
+    return httpd, sup
+
+
 def serve(dir_="results", host="127.0.0.1", port=8080):
     # One control centre per directory, period. A second `serve` on the same
     # port silently steals the URL from the first, and with two supervisors
@@ -935,10 +999,7 @@ def serve(dir_="results", host="127.0.0.1", port=8080):
             "    netstat -ano | grep :8080\n"
             "    taskkill /PID <pid> /F")
 
-    sup = SUP.Supervisor(results_dir=dir_)
-    httpd = HTTPServer(
-        (host, port),
-        lambda *a, **kw: _Handler(*a, results_dir=dir_, supervisor=sup, **kw))
+    httpd, sup = make_server(dir_, host, port)
     print(f"Drawtle Bench control centre on http://{host}:{port}  (Ctrl-C to stop)")
     print(f"  results : {os.path.abspath(dir_)}")
     print(f"  overlay : {DSC.OVERLAY_FILE}")

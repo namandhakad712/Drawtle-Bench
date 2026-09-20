@@ -217,18 +217,6 @@ function ci(c) {{
   return "[" + (c[0] * 100).toFixed(1) + ", " + (c[1] * 100).toFixed(1) + "]";
 }}
 
-async function api(path, opts) {{
-  const r = await fetch(path, opts || {{}});
-  let j = null;
-  try {{ j = await r.json(); }} catch (e) {{ j = {{error: "server returned non-JSON"}}; }}
-  if (!r.ok) {{
-    const e = new Error((j && (j.error || j.detail)) || ("HTTP " + r.status));
-    e.body = j;
-    throw e;
-  }}
-  return j;
-}}
-
 function setPills(sys, runs) {{
   if (sys) {{
     const el = $("#pill-sandbox");
@@ -249,6 +237,7 @@ function setPills(sys, runs) {{
 }}
 
 let VIEW = "overview";
+let SHOW_SEQ = 0;      // bumped by show(); disarms a stale render watchdog
 const RENDER = {{}};
 let CURRENT_MODAL = null;
 
@@ -265,8 +254,18 @@ function onDocKeydown(e) {{
 }}
 document.addEventListener("keydown", onDocKeydown);
 
+// A view's fetches are tied to the view. Navigating away aborts them, so a slow
+// response cannot land on a container that has already been replaced -- which is
+// how a view used to throw "Cannot set properties of null" when you clicked away
+// while it was still loading.
+let CURRENT_ABORT = null;
+
 async function api(path, opts) {{
-  const r = await fetch(path, opts || {{}});
+  opts = opts || {{}};
+  const signal = opts.signal || (CURRENT_ABORT ? CURRENT_ABORT.signal : undefined);
+  const init = Object.assign({{}}, opts);
+  if (signal && !init.signal) init.signal = signal;
+  const r = await fetch(path, init);
   let j = null;
   try {{ j = await r.json(); }} catch (e) {{ j = {{error: "server returned non-JSON"}}; }}
   if (!r.ok) {{
@@ -283,6 +282,8 @@ async function apiWithRetry(path, opts, attempts) {{
     try {{
       return await api(path, opts);
     }} catch (e) {{
+      // A navigation aborted this request. Retrying would fight the user.
+      if (e && e.name === "AbortError") throw e;
       last = e;
       await new Promise(r => setTimeout(r, 250));
     }}
@@ -302,7 +303,36 @@ function show(name) {{
   v.className = old.className;
   v.innerHTML = '<div class="empty"><span class="spin"></span> loading</div>';
   old.replaceWith(v);
+
+  // Everything the previous view had in flight is now pointing at a detached
+  // node. Abort it: a late response that writes into a replaced container is
+  // how the Replays tab threw "Cannot set properties of null".
+  if (CURRENT_ABORT) CURRENT_ABORT.abort();
+  CURRENT_ABORT = new AbortController();
+
+  // A view that never settles must not leave a spinner up forever. The server
+  // is threaded and every outbound call now has a hard deadline, so this should
+  // never fire -- but "the dashboard silently spins and the console is clean"
+  // is the single most confusing failure this UI can present, and a watchdog
+  // costs nothing. It only acts if the render has not settled, and only for the
+  // current view (a newer show() bumps the sequence and disarms it).
+  const seq = ++SHOW_SEQ;
+  let settled = false;
+  const watchdog = setTimeout(() => {{
+    if (settled || seq !== SHOW_SEQ) return;
+    v.innerHTML = '<div class="note err"><b>This view did not finish loading.</b><br>'
+      + 'A request never returned. The server may be busy, or a provider probe '
+      + 'is still waiting on a host that is not answering.'
+      + '<div style="margin-top:9px"><button class="lnk" data-retry="'
+      + esc(name) + '">retry</button> <span class="tiny faint">if it repeats, '
+      + 'check the terminal running the control centre for the failing route.'
+      + '</span></div></div>';
+  }}, 30000);
+
   (RENDER[name] || RENDER.overview)(v).catch(e => {{
+    // Aborted because the user navigated away: the view is gone and there is
+    // nothing to report. Anything else is a real render failure.
+    if (e && e.name === "AbortError") return;
     v.innerHTML = '<div class="note err"><b>Could not render this view.</b><br>'
       + esc(e.message)
       + '<div style="margin-top:9px"><button class="lnk" data-retry="'
@@ -310,6 +340,9 @@ function show(name) {{
       + '(e.g. the server was still starting) often clears on retry; otherwise '
       + 'the detail above is copied to the browser console.</span></div>';
     console.error("render failed for", name, e);
+  }}).finally(() => {{
+    settled = true;
+    clearTimeout(watchdog);
   }});
 }}
 
@@ -317,6 +350,16 @@ function show(name) {{
 // above cannot see. Surface those as a toast rather than swallowing them.
 window.addEventListener("error", e => {{
   if (e && e.message) toast("Error: " + e.message, "bad");
+}});
+// An unhandled rejection is a real bug and should be visible -- except an abort,
+// which is the deliberate result of navigating away from a view mid-load.
+window.addEventListener("unhandledrejection", e => {{
+  const r = e && e.reason;
+  if (r && r.name === "AbortError") {{
+    e.preventDefault();
+    return;
+  }}
+  toast("Unhandled error: " + ((r && r.message) || r), "bad");
 }});
 // Retry buttons live inside view content that gets replaced on every render, so
 // handle them at the document level rather than per-view.
@@ -1096,6 +1139,13 @@ RENDER.launch = async function (v) {{
 RENDER.results = async function (v) {{
   const runs = await apiWithRetry("/api/runs");
 
+  // Split first: the toolbar below decides whether to offer "delete incomplete"
+  // from `bad.length`, so these must be declared before the markup is built.
+  // Reading a `const` above its declaration is a temporal-dead-zone error that
+  // throws the whole view away -- which is exactly what it used to do here.
+  const clean = (runs.runs || []).filter(r => r.status === "success");
+  const bad = (runs.runs || []).filter(r => r.status !== "success");
+
   let html = '<h1>Results</h1>'
     + '<div class="toolbar">'
     + '<button class="btn" data-act="exp-csv">Export CSV</button>'
@@ -1109,9 +1159,6 @@ RENDER.results = async function (v) {{
     + '<div class="dim" style="margin:4px 0 16px">'
     + 'Every run in <code>' + esc(runs.dir || "results") + '</code>, clean and '
     + 'excluded, with log health.</div>';
-
-  const clean = (runs.runs || []).filter(r => r.status === "success");
-  const bad = (runs.runs || []).filter(r => r.status !== "success");
 
   html += stats([
     {{ k: "runs", v: (runs.runs || []).length }},
@@ -1657,6 +1704,9 @@ RENDER.replays = async function (v) {{
 
   async function loadEpisodes(runId) {{
     const d = await api("/api/run/" + encodeURIComponent(runId));
+    // The container may have been replaced while this was in flight; writing
+    // to a node that is no longer in the document throws.
+    if (!v.isConnected) return;
     $("#rp-ep-count").textContent = (d.episodes || []).length + " episode(s)";
     $("#rp-ep-list").innerHTML = (d.episodes || []).map(ep =>
       '<button class="btn" data-ep="' + ep + '">episode ' + ep + '</button>').join("")
@@ -1665,6 +1715,7 @@ RENDER.replays = async function (v) {{
   async function loadTurns(runId, ep) {{
     const d = await api("/api/replay/" + encodeURIComponent(runId) + "/"
       + encodeURIComponent(ep));
+    if (!v.isConnected) return;
     const turns = d.turns || [];
     if (!turns.length) {{ $("#rp-stage").innerHTML = '<div class="empty">No turns.</div>'; return; }}
     const lats = turns.map(t => t.latency_s || 0);
@@ -1730,22 +1781,39 @@ RENDER.replays = async function (v) {{
 
   if (sel) await loadEpisodes(sel);
   $("#rp-run").addEventListener("change", async e => {{
-    await loadEpisodes(e.target.value); $("#rp-stage").innerHTML = "";
+    await loadEpisodes(e.target.value);
+    const stage = $("#rp-stage");
+    if (stage) stage.innerHTML = "";
     AutoPlay(e.target.value);
   }});
   async function AutoPlay(runId) {{
-    const d = await api("/api/run/" + encodeURIComponent(runId));
-    const eps = d.episodes || [];
-    if (eps.length) {{
-      const first = $("#rp-ep-list").querySelector("button[data-ep='" + eps[0] + "']");
-      if (first) first.click();
-    }}
+    // Fire-and-forget: this is called without an await, so it must not reject.
+    // A navigation aborts its fetch, and an unhandled rejection would surface
+    // as an uncaught error in the console.
+    try {{
+      const d = await api("/api/run/" + encodeURIComponent(runId));
+      if (!v.isConnected) return;
+      const eps = d.episodes || [];
+      if (eps.length) {{
+        const list = $("#rp-ep-list");
+        if (!list) return;
+        const first = list.querySelector("button[data-ep='" + eps[0] + "']");
+        if (first) first.click();
+      }}
+    }} catch (e) {{ /* navigated away, or the run has no episodes */ }}
   }}
   $("#rp-ep-list").addEventListener("click", async e => {{
     const b = e.target.closest("button[data-ep]"); if (!b) return;
-    $("#rp-stage").innerHTML = '<div class="empty"><span class="spin"></span> loading</div>';
+    const stage = $("#rp-stage");
+    if (!stage) return;                 // the view was replaced; nothing to paint
+    stage.innerHTML = '<div class="empty"><span class="spin"></span> loading</div>';
     try {{ await loadTurns($("#rp-run").value, b.dataset.ep); }}
-    catch (er) {{ $("#rp-stage").innerHTML = '<div class="note err">' + esc(er.message) + '</div>'; }}
+    catch (er) {{
+      // Navigating away aborts the fetch and detaches the stage. Writing to a
+      // null node here threw an uncaught TypeError out of the handler.
+      const s = $("#rp-stage");
+      if (s) s.innerHTML = '<div class="note err">' + esc(er.message) + '</div>';
+    }}
   }});
   if (sel) AutoPlay(sel);
 }};
