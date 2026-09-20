@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.8.3 — the sandbox can actually see (container rasteriser fix)
+
+A vision run inside the sandbox died on its first turn: `RuntimeError: No
+SVG->PNG rasteriser available`, with `cairosvg: no library called "cairo-2"`
+and `playwright: No module named 'playwright'`. The image had `pip install
+cairosvg` in its Dockerfile, but cairosvg is pure Python and loads libcairo
+through cairocffi — and Debian slim ships **no cairo at all**, so the install
+succeeded and every render failed. Playwright was never in the image.
+
+- **`docker/Dockerfile`:** installs `libcairo2` (~2 MB, `--no-install-recommends`,
+  apt lists dropped) before the cairosvg install. The frame SVG is shape-only
+  (no `<text>`), so the library alone is sufficient.
+- **`drawtle/frames.py`:** the cairosvg path hardcoded 480x300 while the
+  Playwright path screenshots at the SVG's own viewBox (900x560) — two
+  rasterisers giving the same maze different pixel sizes is a different model
+  input depending on host vs container. Both paths now render at the SVG's
+  own dimensions.
+- Verified inside the built image: `frames.rasterize()` produces a 900x560
+  PNG (`RASTERISED OK: 900 x 560`).
+
 ## v2.8.2 — sidebar navigation, full Docker control, build fix
 
 ### The dashboard navigation is now a collapsible sidebar
