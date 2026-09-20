@@ -123,8 +123,10 @@ def _config_root():
     return os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
 
 
-CRED_DIR = os.path.join(_config_root(), "drawtle-bench")
-CRED_FILE = os.path.join(CRED_DIR, "credentials.json")
+CRED_DIR = os.environ.get("DRAWTLE_CRED_DIR") \
+    or os.path.join(_config_root(), "drawtle-bench")
+CRED_FILE = os.environ.get("DRAWTLE_CRED_FILE") \
+    or os.path.join(CRED_DIR, "credentials.json")
 
 
 # ------------------------------------------------------------------ store ---
@@ -166,6 +168,30 @@ def store_key(backend, key):
         os.chmod(CRED_FILE, stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
         pass                                   # Windows: ACLs, not mode bits
+    return CRED_FILE
+
+
+def clear_key(backend):
+    """Remove a stored key for `backend`. Returns the credential-file path.
+
+    Symmetric to `store_key`: merge-and-delete rather than rewrite, so clearing
+    one provider never discards the others. Clearing a key that is not stored is
+    a no-op success, not an error -- the intent ("I no longer want this on disk")
+    is already satisfied.
+    """
+    backend = str(backend or "").strip()
+    keys, _ = _load_credentials()
+    if backend in keys:
+        del keys[backend]
+        os.makedirs(CRED_DIR, exist_ok=True)
+        tmp = CRED_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"keys": keys}, fh, indent=2)
+        os.replace(tmp, CRED_FILE)
+        try:
+            os.chmod(CRED_FILE, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
     return CRED_FILE
 
 

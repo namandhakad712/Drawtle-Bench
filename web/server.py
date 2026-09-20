@@ -28,6 +28,7 @@ and every route is bounded:
   POST  /api/model              add or edit a model
   POST  /api/model/delete       hide one
   POST  /api/adopt              write discovered models into the overlay
+  POST  /api/keys               store or clear a key for one provider
 
 Bound on the local interface only. It is not a hardened multi-user service and
 does not pretend to be: it binds 127.0.0.1, it has no authentication, and the
@@ -768,6 +769,34 @@ def _system(dir_):
     }
 
 
+def key_status():
+    """Per-provider key state for the control-centre UI.
+
+    Only providers that actually require a key are listed (those with a
+    `key_env` and not flagged self-hosted). For each, the *current* value is
+    shown **masked** -- `resolve_key` returns the raw secret, but it is run
+    through `mask()` and only the masked form leaves this function. No endpoint
+    in this server ever serialises a key value, and `test_control_centre` pins
+    that: a GET here must not contain the raw secret anywhere in its body.
+    """
+    provs = DSC.merged_providers() or {}
+    out = []
+    for name in sorted(provs):
+        spec = provs[name] or {}
+        envs = spec.get("key_env") or []
+        if not envs or spec.get("self_hosted"):
+            continue                        # no key needed: not a row
+        key, source = CAT.resolve_key(name)
+        out.append({
+            "name": name,
+            "env": list(envs),
+            "has_key": bool(key),
+            "masked": CAT.mask(key) if key else None,
+            "source": source,
+        })
+    return {"providers": out, "path": CAT.CRED_FILE}
+
+
 # -- cached machine facts ---------------------------------------------------
 # `describe()` asks docker (a subprocess, up to 8s) and `rasteriser_status
 # (probe=True)` rasterises a test PNG (seconds on a cold run). BOTH are
@@ -840,6 +869,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(G.registry_summary())
             elif path == "/api/overlay":
                 self._json(DSC.overlay_status())
+            elif path == "/api/keys":
+                self._json(key_status())
             elif path == "/api/settings":
                 self._json(SET.describe())
             elif path == "/api/unknown":
@@ -956,6 +987,22 @@ class _Handler(BaseHTTPRequestHandler):
                 except SET.SettingsError as e:
                     return self._err(str(e), 400)
                 return self._json({"ok": True, "settings": updated})
+            if path == "/api/keys":
+                backend = str(body.get("backend") or "").strip()
+                if not backend or backend not in (DSC.merged_providers() or {}):
+                    return self._err("unknown provider", 400)
+                key = body.get("key")
+                # Empty / whitespace-only key clears the stored secret instead
+                # of writing a blank one -- a blank key is never a real key, and
+                # storing it would make `resolve_key` return "" and report "set".
+                if not key or not str(key).strip():
+                    CAT.clear_key(backend)
+                    return self._json({"ok": True, "cleared": True,
+                                       "backend": backend})
+                path_written = CAT.store_key(backend, str(key))
+                return self._json({"ok": True, "backend": backend,
+                                   "masked": CAT.mask(str(key).strip()),
+                                   "path": path_written})
             if path == "/api/model/favorite":
                 try:
                     favs = SET.toggle_favorite(body.get("id"), body.get("on"))

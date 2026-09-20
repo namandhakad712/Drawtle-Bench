@@ -1990,8 +1990,9 @@ RENDER.logs = async function (v) {{
 // ---- SYSTEM ----------------------------------------------------------------
 
 RENDER.system = async function (v) {{
-  const [sys, ov, unknown] = await Promise.all([
-    apiWithRetry("/api/system"), apiWithRetry("/api/overlay"), apiWithRetry("/api/unknown")
+  const [sys, ov, unknown, keys] = await Promise.all([
+    apiWithRetry("/api/system"), apiWithRetry("/api/overlay"),
+    apiWithRetry("/api/unknown"), apiWithRetry("/api/keys")
   ]);
   setPills(sys, null);
 
@@ -2100,6 +2101,35 @@ RENDER.system = async function (v) {{
         + 'An exported variable always beats a stored file.</div>'
       : '<div class="empty">Every provider that needs a key has one.</div>');
 
+  // M4: store or clear a key from the UI instead of the CLI or a hand-edited
+  // file. The value is shown masked (the server returns only the masked form),
+  // and the input is type=password so it is not echoed on screen.
+  const kprov = (keys && keys.providers) || [];
+  html += panel("API keys",
+    kprov.length ? "stored in your config dir, never in the repo" : "every keyed provider is set",
+    (kprov.length
+      ? '<div class="tiny dim" style="margin-bottom:8px">An exported environment '
+        + 'variable still wins over a stored key. Values are shown masked -- the '
+        + 'server never returns a key in full.</div>'
+        + '<table><thead><tr><th>Provider</th><th>Env var(s)</th><th>Current</th>'
+        + '<th>Set / clear</th></tr></thead><tbody>'
+        + kprov.map(p =>
+            '<tr><td class="model-cell">' + esc(p.name) + '</td>'
+            + '<td class="tiny mono">' + esc((p.env || []).join(", ")) + '</td>'
+            + '<td class="tiny">' + (p.has_key
+                ? esc(p.masked) + ' <span class="faint">(' + esc(p.source) + ')</span>'
+                : '<span class="faint">none stored</span>') + '</td>'
+            + '<td class="nowrap"><input id="key-' + esc(p.name) + '" class="mono" '
+            + 'type="password" placeholder="paste key" style="width:190px">'
+            + ' <button class="btn" data-key-save="' + esc(p.name) + '">Save</button>'
+            + ' <button class="lnk" data-key-clear="' + esc(p.name) + '">clear</button>'
+            + '</td></tr>').join("")
+        + '</tbody></table>'
+      : '<div class="empty">No provider requires a key, or all required keys are set.</div>')
+    + note('Stored at <code>' + esc((keys && keys.path) || "credentials.json")
+      + '</code>, owner-only on disk. Clearing removes the stored value only; an '
+      + 'exported variable is untouched.', "info"));
+
   v.innerHTML = html;
   const reloadBtn = $("#sys-reload");
   if (reloadBtn) {{
@@ -2117,6 +2147,33 @@ RENDER.system = async function (v) {{
       }}
     }});
   }}
+
+  bind(v, "click", async e => {{
+    const save = e.target.closest("[data-key-save]");
+    if (save) {{
+      const inp = $("#key-" + save.dataset.keySave, v);
+      const val = inp ? inp.value : "";
+      if (!val.trim()) {{ toast("type a key, or use clear", "bad"); return; }}
+      try {{
+        await api("/api/keys", {{ method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{ backend: save.dataset.keySave, key: val }}) }});
+        toast("saved " + save.dataset.keySave, "good");
+        show("system");
+      }} catch (err) {{ toast(err.message, "bad"); }}
+      return;
+    }}
+    const clr = e.target.closest("[data-key-clear]");
+    if (clr) {{
+      try {{
+        await api("/api/keys", {{ method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{ backend: clr.dataset.keyClear, key: "" }}) }});
+        toast("cleared " + clr.dataset.keyClear, "good");
+        show("system");
+      }} catch (err) {{ toast(err.message, "bad"); }}
+    }}
+  }});
 }};
 
 // ---- replays + storyboard + export ----------------------------------------
