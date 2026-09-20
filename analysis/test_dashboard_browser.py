@@ -98,13 +98,18 @@ def main():
 
             for tab in TABS:
                 if tab != "overview":
-                    pg.click(f'nav.tabs button[data-view="{tab}"]')
+                    pg.click(f'#side nav button[data-view="{tab}"]')
                 try:
                     pg.wait_for_function(
                         "() => { const v = document.querySelector('#view');"
                         " return v && !v.querySelector('.spin')"
                         " && v.innerHTML.length > 200; }",
-                        timeout=20000)
+                        # Longer than the page's own 30s render watchdog so a
+                        # view that genuinely cannot settle fails with the
+                        # watchdog's error note (a real diagnosis) instead of
+                        # an ambiguous "loading" -- and a healthy view that is
+                        # merely slow on a loaded machine gets a fair window.
+                        timeout=32000)
                     # A view paints its shell, then awaits. Give the awaited
                     # part a moment to land (or to throw) before judging it,
                     # otherwise a view that fails after painting looks fine.
@@ -123,7 +128,7 @@ def main():
             # per provider. The tab already rendered in the loop above; this
             # pins that the keys surface is actually present, not just that the
             # System tab did not throw.
-            pg.click('nav.tabs button[data-view="system"]')
+            pg.click('#side nav button[data-view="system"]')
             pg.wait_for_selector("#view")
             pg.wait_for_timeout(300)
             sys_txt = pg.inner_text("#view")
@@ -138,19 +143,22 @@ def main():
             # The panel must be present, and when Docker is not installed (this
             # machine) it must show its state and NOT offer actions -- offering a
             # Build button that can only fail would be false comfort. A real
-            # host with Docker gets the three buttons instead.
+            # host with Docker gets the six buttons instead.
             check("the System view shows the Docker control panel",
                   "Docker control" in sys_txt, sys_txt[:200])
-            # The three action buttons are all-or-nothing (docker present or
+            # The action buttons are all-or-nothing (docker present or
             # withheld) -- never partial, never runnable when the daemon is
             # down. The Refresh control is always there: it is how the user
             # re-probes after starting Docker Desktop without reloading.
             n_dk_actions = pg.eval_on_selector_all(
                 "#view button[data-act='dk-build'], "
-                "#view button[data-act='dk-test'], "
-                "#view button[data-act='dk-stop']", "els => els.length")
+                "#view button[data-act='dk-smoke'], "
+                "#view button[data-act='dk-up'], "
+                "#view button[data-act='dk-proxy-on'], "
+                "#view button[data-act='dk-proxy-off'], "
+                "#view button[data-act='dk-down']", "els => els.length")
             check("Docker actions are all-or-nothing (present or withheld)",
-                  n_dk_actions in (0, 3), f"dk action buttons={n_dk_actions}")
+                  n_dk_actions in (0, 6), f"dk action buttons={n_dk_actions}")
             # The panel body fills ASYNCHRONOUSLY after the view paints (the
             # docker probe can take a couple of seconds), so wait for the
             # Refresh control rather than sampling the DOM early.
@@ -162,7 +170,7 @@ def main():
                 refresh_ok = False
             check("the Docker panel always offers a live refresh",
                   refresh_ok, "no dk-refresh control appeared")
-            pg.click('nav.tabs button[data-view="launch"]')
+            pg.click('#side nav button[data-view="launch"]')
             pg.wait_for_selector("#l-sandbox", timeout=8000)
             check("the Launch form offers the sandbox container option",
                   pg.evaluate("() => !!document.querySelector('#l-sandbox')"),
@@ -172,7 +180,7 @@ def main():
             # Launch: choosing a provider must narrow the model list to that
             # provider's models. Asserted rather than assumed -- the whole point
             # of the control is that a run cannot be aimed at the wrong endpoint.
-            pg.click('nav.tabs button[data-view="launch"]')
+            pg.click('#side nav button[data-view="launch"]')
             pg.wait_for_selector("#l-backend")
             total = pg.eval_on_selector_all("#l-model-list option", "els => els.length")
             narrowed = pg.evaluate("""() => {
@@ -213,7 +221,7 @@ def main():
             # (see the top of this file), so deleting a few is safe.
             dialogs = []
             pg.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
-            pg.click('nav.tabs button[data-view="providers"]')
+            pg.click('#side nav button[data-view="providers"]')
             pg.wait_for_selector("#view table")
             per_click = []
             for _ in range(3):
@@ -243,7 +251,7 @@ def main():
                   "no banner: the page could be showing self-test data while "
                   "looking like a normal view")
 
-            pg.click('nav.tabs button[data-view="results"]')
+            pg.click('#side nav button[data-view="results"]')
             pg.wait_for_selector("#res-q")
             rows_all = pg.eval_on_selector_all("#res-bad table tbody tr",
                                                "els => els.length")
@@ -327,13 +335,13 @@ def main():
             # ---- M6: analytics + integrity render -----------------------
             # (Test mode is on from the Results section, so these aggregate the
             # committed mock runs rather than an empty live view.)
-            pg.click('nav.tabs button[data-view="analytics"]')
+            pg.click('#side nav button[data-view="analytics"]')
             pg.wait_for_selector("#view")
             pg.wait_for_timeout(450)
             an_txt = pg.inner_text("#view")
             check("the Analytics view renders with a by-provider table",
                   "Analytics" in an_txt and "By provider" in an_txt, an_txt[:140])
-            pg.click('nav.tabs button[data-view="integrity"]')
+            pg.click('#side nav button[data-view="integrity"]')
             pg.wait_for_selector("#view")
             pg.wait_for_timeout(450)
             ig_txt = pg.inner_text("#view")

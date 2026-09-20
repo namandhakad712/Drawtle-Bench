@@ -119,28 +119,30 @@ def sp(text):
 
 # ------------------------------------------------------------------- shell ---
 
-_TABS = [
-    ("overview", "Overview"),
-    ("providers", "Providers"),
-    ("models", "Models"),
-    ("launch", "Launch a run"),
-    ("results", "Results"),
-    ("replays", "Replays"),
-    ("storyboard", "Storyboard"),
-    ("analytics", "Analytics"),
-    ("integrity", "Integrity"),
-    ("logs", "Logs"),
-    ("system", "System"),
-    ("settings", "Settings"),
+# Navigation, grouped by what the item is FOR. The sidebar is the primary
+# navigation (a tab strip across a 56px header cannot carry twelve views);
+# "Run / Models / Results / Operations" is how a person thinks about the
+# surface, not an alphabet soup.
+_NAV = [
+    ("Run", [("overview", "Overview"), ("launch", "Launch a run")]),
+    ("Models", [("providers", "Providers"), ("models", "Models")]),
+    ("Results", [("results", "Results"), ("replays", "Replays"),
+                 ("storyboard", "Storyboard"), ("analytics", "Analytics"),
+                 ("integrity", "Integrity")]),
+    ("Operations", [("logs", "Logs"), ("system", "System"),
+                    ("settings", "Settings")]),
 ]
 
 
 def page(version, state):
     """The whole document. `state` is the initial bootstrap JSON."""
-    tabs = "".join(
-        f'<button role="tab" data-view="{k}" aria-selected="'
-        f'{"true" if k == "overview" else "false"}">{esc(v)}</button>'
-        for k, v in _TABS)
+    side = []
+    for label, items in _NAV:
+        side.append(f'<div class="sgroup">{esc(label)}</div>')
+        for k, v in items:
+            cur = ' aria-current="page"' if k == "overview" else ""
+            side.append(f'<button class="snav" data-view="{k}"{cur}>{esc(v)}</button>')
+    side = "".join(side)
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -150,8 +152,9 @@ def page(version, state):
 </head><body>
 
 <header class="top"><div class="wrap">
+  <button class="sq" id="tg-side" aria-expanded="true"
+          title="Collapse or expand the navigation sidebar">&#9776;</button>
   <div class="brand">Drawtle Bench <span class="ver">v{esc(version)}</span></div>
-  <nav class="tabs" role="tablist">{tabs}</nav>
   <div class="spacer"></div>
   <button class="pill" id="tg-test" aria-pressed="false"
           title="Test mode: show self-test (mock) runs instead of live ones"><span
@@ -161,6 +164,9 @@ def page(version, state):
   <span class="pill" id="pill-sandbox"><span class="dot n"></span> system</span>
   <span class="pill" id="pill-runs"><span class="dot n"></span> runs</span>
 </div></header>
+
+<aside id="side" aria-label="Dashboard views"><nav>{side}</nav></aside>
+<div id="side-scrim"></div>
 
 <main><div class="wrap">
   <div id="banner"></div>
@@ -501,8 +507,36 @@ document.addEventListener("click", e => {{
   if (r) show(r.dataset.retry);
 }});
 
-$$("nav.tabs button").forEach(b =>
-  b.addEventListener("click", () => show(b.dataset.view)));
+$$("#side nav button").forEach(b =>
+  b.addEventListener("click", () => {{
+    show(b.dataset.view);
+    // On a narrow screen the sidebar is a drawer over the content; choosing a
+    // view closes it so the result is visible, not hidden behind the panel.
+    if (window.matchMedia("(max-width: 899px)").matches) setSide(true);
+  }}));
+
+// ---- collapsible sidebar ----------------------------------------------------
+// One state, persisted: `body.side-closed`. Default is open on wide screens,
+// closed on narrow ones (there the sidebar is an overlay drawer and would cover
+// the first thing a visitor wants to see). Nothing about *which* view is shown
+// is persisted -- a reload opens where the run started, not where the last
+// session was; the control centre is an instrument, not a document reader.
+const SIDE_KEY = "drawtle.sideClosed";
+function setSide(closed) {{
+  document.body.classList.toggle("side-closed", closed);
+  const t = $("#tg-side");
+  if (t) t.setAttribute("aria-expanded", String(!closed));
+  try {{ localStorage.setItem(SIDE_KEY, closed ? "1" : "0"); }} catch (e) {{}}
+}}
+(function initSide() {{
+  let saved = null;
+  try {{ saved = localStorage.getItem(SIDE_KEY); }} catch (e) {{}}
+  if (saved === null)
+    saved = window.matchMedia("(max-width: 899px)").matches ? "1" : "0";
+  setSide(saved === "1" || saved === "true");
+}})();
+$("#tg-side").addEventListener("click", () => setSide(!document.body.classList.contains("side-closed")));
+$("#side-scrim").addEventListener("click", () => setSide(true));
 
 // ---- shared renderers ------------------------------------------------------
 
@@ -2191,8 +2225,9 @@ RENDER.system = async function (v) {{
         show("system");
       }} catch (err) {{ toast(err.message, "bad"); }}
     }}
-    // Docker actions. The server only accepts build|test|stop (an enum, not a
-    // command string), so no shell input from the client can reach subprocess.
+    // Docker actions. The server only accepts build|up|proxy-on|proxy-off|
+    // smoke|down (an enum, not a command string), so no shell input from the
+    // client can reach subprocess.
     // The action's output streams into #dk-out, which lives OUTSIDE #dk-body,
     // so refreshing the status afterwards (fillDocker) never wipes it.
     const dkact = e.target.closest("[data-act^='dk-']");
@@ -2461,47 +2496,69 @@ RENDER.storyboard = async function (v) {{
 
 // ---- docker control panel (M3) --------------------------------------------
 function dockerPanelBody(dk) {{
+  const svc = (dk.services || []).map(s =>
+    '<tr><td class="model-cell">' + esc(s.service) + '</td>'
+    + '<td>' + (s.state === "running" ? tag("running", "ok")
+        : s.state === "exited" ? tag("exited", "warn")
+        : s.state === "not stated" ? '<span class="faint">not started</span>'
+        : tag(s.state || "?", "warn")) + '</td>'
+    + '<td class="tiny faint">' + esc(s.status || "") + '</td></tr>').join("");
   return '<div class="kv">'
     + '<span class="k">docker</span><span class="v">' + (dk.docker_available ? "yes" : "no")
       + " \\u2014 " + esc(dk.docker_detail || "") + '</span>'
     + '<span class="k">current isolation</span><span class="v">' + esc(dk.level) + '</span>'
-    + '<span class="k">image built</span><span class="v">' + (dk.image_built ? "yes" : "no") + '</span>'
-    + '<span class="k">container</span><span class="v">' + esc(dk.container || "not started") + '</span>'
+    + '<span class="k">images</span><span class="v">' + (dk.image_built ? "built" : "not built") + '</span>'
     + '</div>'
-    + '<div class="toolbar" style="margin:8px 0 4px">'
+    + '<table style="margin:8px 0 2px"><thead><tr><th>Service</th>'
+    + '<th>State</th><th>Status</th></tr></thead><tbody>' + svc + '</tbody></table>'
+    + '<div class="toolbar" style="margin:8px 0 4px;flex-wrap:wrap;gap:6px">'
     + (dk.docker_available
         ? '<button class="btn" data-act="dk-build">Build images</button>'
-          + '<button class="btn" data-act="dk-test">Smoke-test container</button>'
-          + '<button class="btn" data-act="dk-stop">Stop container</button>'
+          + '<button class="btn" data-act="dk-smoke">Smoke-test</button>'
+          + '<button class="btn" data-act="dk-up">Start all</button>'
+          + '<button class="btn" data-act="dk-proxy-on">Egress on</button>'
+          + '<button class="btn" data-act="dk-proxy-off">Egress off</button>'
+          + '<button class="btn" data-act="dk-down">Stop all</button>'
         : '<span class="tiny dim">Docker not reachable. Start Docker Desktop '
-          + '(it takes a minute), then hit Refresh.</span>')
+          + '(it takes a minute); this panel refreshes itself once the daemon '
+          + 'comes up.</span>')
     + '<button class="lnk" data-act="dk-refresh" style="margin-left:auto">'
       + 'refresh status</button>'
     + '</div>'
     + (dk.docker_available
-        ? note('<b>Build</b> compiles the images. <b>Smoke-test</b> runs the '
-          + 'compose mock inside the container and streams it here \\u2014 it '
-          + 'verifies image, volumes, user and dataset before any key is spent. '
-          + 'Runs from the Launch tab actually enter the container when you tick '
+        ? note('<b>Build</b> compiles both images (bench + egress proxy). '
+          + '<b>Smoke-test</b> runs the mock inside the container and streams '
+          + 'here \\u2014 verifies image, volumes, user and dataset before any '
+          + 'key is spent. <b>Egress on</b> starts the allow-list proxy; '
+          + '<b>Egress off</b> stops it. The <code>bench</code> service is a '
+          + 'one-shot: it runs and exits, so <b>Start all</b> shows it as '
+          + '"exited" \\u2014 that is the smoke test finishing, not a failure. '
+          + 'Runs from the Launch tab enter this container when you tick '
           + '<b>run inside the sandbox container</b> there; localhost providers '
-          + 'stay on the host, because the container has no route to your '
-          + 'machine. <b>Stop</b> tears the project down.', "info")
+          + 'stay on the host.', "info")
         : note('<b>Docker is not installed or not reachable.</b> The container '
           + 'path in <code>docker/sandbox.md</code> cannot be executed here. The '
-          + 'benchmark still runs on the host; this is OS-level assurance only.',
+          + 'benchmark still runs on the host; this is OS-level assurance only. '
+          + 'Once Docker Desktop is running, this panel picks it up on its own.',
           "warn"));
 }}
 
+let _DK_POLL = null;
 async function fillDocker(v) {{
-  // Live state, refetchable by the Refresh button and re-run after every
-  // action. The output <pre> lives OUTSIDE #dk-body (see the System view), so
-  // refreshing the status never wipes the last action's output.
+  // Live state, refetchable by the Refresh button, re-run after every action,
+  // and -- while Docker is DOWN -- auto-polled so the panel picks the daemon up
+  // by itself once Docker Desktop finishes starting. No manual reload needed:
+  // this is the "I started Docker, now what" path. The output <pre> lives
+  // OUTSIDE #dk-body (see the System view), so refreshing never wipes output.
   const el = $("#dk-body", v);
   if (!el || !v.isConnected) return;
+  clearTimeout(_DK_POLL);
   try {{
     const dk = await apiWithRetry("/api/docker");
     if (!v.isConnected || !$("#dk-body", v)) return;
     $("#dk-body", v).innerHTML = dockerPanelBody(dk);
+    if (!dk.docker_available)
+      _DK_POLL = setTimeout(() => {{ if (v.isConnected) fillDocker(v); }}, 8000);
   }} catch (e) {{
     const el2 = $("#dk-body", v);
     if (el2 && v.isConnected)

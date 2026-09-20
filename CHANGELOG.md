@@ -1,5 +1,47 @@
 # Changelog
 
+## v2.8.2 — sidebar navigation, full Docker control, build fix
+
+### The dashboard navigation is now a collapsible sidebar
+Twelve views cannot live in a 56px header tab strip. The control centre now
+ships a **left sidebar** grouped by purpose (Run / Models / Results /
+Operations), toggled from the header, with the collapsed/expanded state
+remembered in localStorage. On narrow screens it becomes a drawer over the
+content with a scrim, and choosing a view closes it. Server-rendered docs,
+replays and every existing view are untouched; only the shell moved.
+
+### Docker panel: real per-service control, and the build actually works
+- **The Build action was failing and nobody knew why.** `docker compose build`
+  builds *every* service. The egress-proxy image is built with `context: .`
+  (resolved to `docker/`), but its Dockerfile COPYed `docker/egress_proxy.py` —
+  which resolves inside that context to **docker/docker/egress_proxy.py** and
+  died with "not found". The bench image built fine because it uses
+  `context: ..`. Single-service builds masked it; the panel's `compose build`
+  (both images) surfaced it as a 502. Fixed: the COPY is now
+  context-relative (`egress_proxy.py`).
+- **New guard in `check_docker.py`:** resolves each compose service's build
+  context against the compose file's directory and verifies every COPY source
+  exists inside it. Falsified: restoring the old line makes it fail with
+  `docker\docker\egress_proxy.py`.
+- **Per-service status instead of one blob:** `/api/docker` now reports
+  `services[]` (`bench`, `egress-proxy`) with state/status, because `bench` is
+  a one-shot that legitimately shows "exited" after a smoke test while
+  `egress-proxy` is long-running. The panel shows a services table.
+- **Full action set:** Build images / Smoke-test / Start all / Egress on /
+  Egress off / Stop all / refresh — each an enum-checked fixed argv, never a
+  command string. Errors now carry docker's own output tail in `error`, not
+  just a bare 502.
+- **Auto-recovery:** while the daemon is down the panel polls every 8s and
+  populates itself once Docker Desktop is up — no manual reload ("I started
+  Docker, now what").
+
+### Test suite hardening
+- Browser suite: sidebar listed / collapses / expands assertions; nan waits
+  raised to 32s (past the page's own 30s render watchdog) so a view that
+  genuinely cannot settle fails with the watchdog's diagnosis instead of an
+  ambiguous spinner — two off-by-contention flakes under parallel load went
+  away.
+
 ## v2.8.1 — the dashboard really connects to Docker
 
 Three things the user found while using it, all real.

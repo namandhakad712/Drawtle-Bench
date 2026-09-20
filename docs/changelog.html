@@ -38,6 +38,8 @@
 <a href="changelog.html" class="on">Changelog</a>
 <a href="contributing.html">Contributing</a>
 <div class="grp">On this page</div><div class="toc">
+<a href="#v2.8.2-sidebar-navigation-full-docker-control-build-fix">v2.8.2 — sidebar navigation, full Docker control, build fix</a>
+<a href="#v2.8.1-the-dashboard-really-connects-to-docker">v2.8.1 — the dashboard really connects to Docker</a>
 <a href="#v2.8.0-finishing-the-dashboard-m3m6">v2.8.0 — finishing the dashboard (M3–M6)</a>
 <a href="#v2.7.1-the-audit-findings-verified-and-fixed">v2.7.1 — the audit findings, verified and fixed</a>
 <a href="#v2.7.0-operability-per-session-folders-testlive-provenance-settings-and-a-doctor">v2.7.0 — operability: per-session folders, test/live provenance, settings, and a doctor</a>
@@ -56,6 +58,47 @@
 </nav>
 <main id="content">
 <h1 id="changelog">Changelog<a class="ah" href="#changelog" aria-label="link">#</a></h1>
+<h2 id="v2.8.2-sidebar-navigation-full-docker-control-build-fix">v2.8.2 — sidebar navigation, full Docker control, build fix<a class="ah" href="#v2.8.2-sidebar-navigation-full-docker-control-build-fix" aria-label="link">#</a></h2>
+<h3 id="the-dashboard-navigation-is-now-a-collapsible-sidebar">The dashboard navigation is now a collapsible sidebar<a class="ah" href="#the-dashboard-navigation-is-now-a-collapsible-sidebar" aria-label="link">#</a></h3>
+<p>Twelve views cannot live in a 56px header tab strip. The control centre now ships a <strong>left sidebar</strong> grouped by purpose (Run / Models / Results / Operations), toggled from the header, with the collapsed/expanded state remembered in localStorage. On narrow screens it becomes a drawer over the content with a scrim, and choosing a view closes it. Server-rendered docs, replays and every existing view are untouched; only the shell moved.</p>
+<h3 id="docker-panel-real-per-service-control-and-the-build-actually-works">Docker panel: real per-service control, and the build actually works<a class="ah" href="#docker-panel-real-per-service-control-and-the-build-actually-works" aria-label="link">#</a></h3>
+<ul>
+<li>
+<strong>The Build action was failing and nobody knew why.</strong> <code>docker compose build</code> builds <em>every</em> service. The egress-proxy image is built with <code>context: .</code> (resolved to <code>docker/</code>), but its Dockerfile COPYed <code>docker/egress_proxy.py</code> — which resolves inside that context to <strong>docker/docker/egress_proxy.py</strong> and died with "not found". The bench image built fine because it uses <code>context: ..</code>. Single-service builds masked it; the panel's <code>compose build</code> (both images) surfaced it as a 502. Fixed: the COPY is now context-relative (<code>egress_proxy.py</code>).
+</li>
+<li>
+<strong>New guard in <code>check_docker.py</code>:</strong> resolves each compose service's build context against the compose file's directory and verifies every COPY source exists inside it. Falsified: restoring the old line makes it fail with <code>docker\docker\egress_proxy.py</code>.
+</li>
+<li>
+<strong>Per-service status instead of one blob:</strong> <code>/api/docker</code> now reports <code>services[]</code> (<code>bench</code>, <code>egress-proxy</code>) with state/status, because <code>bench</code> is a one-shot that legitimately shows "exited" after a smoke test while <code>egress-proxy</code> is long-running. The panel shows a services table.
+</li>
+<li>
+<strong>Full action set:</strong> Build images / Smoke-test / Start all / Egress on / Egress off / Stop all / refresh — each an enum-checked fixed argv, never a command string. Errors now carry docker's own output tail in <code>error</code>, not just a bare 502.
+</li>
+<li>
+<strong>Auto-recovery:</strong> while the daemon is down the panel polls every 8s and populates itself once Docker Desktop is up — no manual reload ("I started Docker, now what").
+</li>
+</ul>
+<h3 id="test-suite-hardening">Test suite hardening<a class="ah" href="#test-suite-hardening" aria-label="link">#</a></h3>
+<ul>
+<li>
+Browser suite: sidebar listed / collapses / expands assertions; nan waits raised to 32s (past the page's own 30s render watchdog) so a view that genuinely cannot settle fails with the watchdog's diagnosis instead of an ambiguous spinner — two off-by-contention flakes under parallel load went away.
+</li>
+</ul>
+<h2 id="v2.8.1-the-dashboard-really-connects-to-docker">v2.8.1 — the dashboard really connects to Docker<a class="ah" href="#v2.8.1-the-dashboard-really-connects-to-docker" aria-label="link">#</a></h2>
+<p>Three things the user found while using it, all real.</p>
+<ul>
+<li>
+<strong>Deleting a provider now deletes its models too.</strong> It used to hide only the provider; the models stayed in the table, so the delete read as "did not work" and the Launch form could still offer a model with no endpoint. One overlay write, same as the batch delete: provider + its models (matched on the <code>provider</code> field only) are removed together, shipped entries tombstoned so the removal stays visible and undoable.
+</li>
+<li>
+<strong>"Run inside the sandbox container" actually runs inside it.</strong> The checkbox was cosmetic before this release: <code>start()</code> always spawned <code>bench.py run</code> on the host, and <code>docker compose up -d</code> only ever ran the compose file's own one-shot mock. The Supervisor now builds (<code>build_cmd</code>, testable without spawning) a <code>docker compose run --rm -T bench run ...</code> command when the box is ticked: paths rewritten to the container's <code>/bench/results</code> mount so the artifacts land in the same results directory the dashboard reads, localhost providers refused before any key is spent (the container cannot reach your machine), and a missing daemon refused with the reason.
+</li>
+<li>
+<strong>The Docker panel is live.</strong> It fetched state once and locked into "disabled" if the daemon was down at render time. Now: a <strong>refresh status</strong> control that re-probes without reloading, the status re-fetches after every action, and the action set is <strong>Build images / Smoke-test container / Stop</strong> -- the smoke test runs the compose mock in the foreground and streams it, so "does the container actually work?" is answerable from the panel.
+</li>
+</ul>
+<p>Also: <code>test_hosted_and_accounting</code> now runs against a throwaway overlay and settings instead of the operator's real one. A user who hides models on the dashboard was turning its "priced model" checks red, and the failure read as a code bug when it was the suite reading someone's edits.</p>
 <h2 id="v2.8.0-finishing-the-dashboard-m3m6">v2.8.0 — finishing the dashboard (M3–M6)<a class="ah" href="#v2.8.0-finishing-the-dashboard-m3m6" aria-label="link">#</a></h2>
 <h3 id="m4-api-keys-in-the-ui">M4 — API keys in the UI<a class="ah" href="#m4-api-keys-in-the-ui" aria-label="link">#</a></h3>
 <p>The dashboard printed only the credentials path; setting a key meant the CLI or a hand-edited file. Added <code>GET/POST /api/keys</code> backed by the existing credential store, with a per-provider table in the System view (masked current value, <code>type=password</code> input, Save / Clear). <strong>No endpoint ever returns a key in full</strong> — <code>key_status()</code> runs every raw secret through <code>catalog.mask()</code> and only the masked form leaves the server. The credential path is now env-overridable (<code>DRAWTLE_CRED_FILE</code>) so the suite writes nowhere the user cares about.</p>

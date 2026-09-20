@@ -98,7 +98,54 @@ nav.tabs button{
 }
 nav.tabs button:hover{color:var(--ink)}
 nav.tabs button[aria-selected=true]{background:var(--white); color:var(--blue); font-weight:620; box-shadow:0 1px 3px rgba(17,19,24,.08)}
+.sq{
+  display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px;
+  font-size:16px; border:1px solid var(--rule); border-radius:9px; background:var(--white);
+  color:var(--ink2); cursor:pointer; flex:none; transition:background .12s, border-color .12s;
+}
+.sq:hover{background:var(--hover); border-color:var(--btnrule)}
 .top .spacer{flex:1}
+
+/* ---------- sidebar navigation ----------
+   The primary navigation is a collapsible left sidebar, not a tab strip: the
+   control centre has twelve views and a 56px header cannot carry them. The
+   header keeps only the brand, the mode/theme pills and the toggle. The sidebar
+   is fixed below the header, pushes the main column on wide screens and
+   slides over it (drawer + scrim) on narrow ones. */
+#side{
+  position:fixed; top:56px; bottom:0; left:0; width:238px; z-index:50;
+  background:var(--white); border-right:1px solid var(--rule);
+  padding:10px 12px 24px; overflow-y:auto; transition:transform .16s ease;
+}
+#side nav button{
+  display:flex; width:100%; align-items:center; gap:9px; text-align:left;
+  font:inherit; font-size:13px; font-weight:550; color:var(--muted);
+  background:none; border:0; cursor:pointer; padding:8px 11px; border-radius:8px;
+  transition:color .12s, background .12s;
+}
+#side nav button:hover{color:var(--ink); background:var(--hover)}
+#side nav button[aria-current=page]{
+  background:var(--blue-bg); color:var(--blue); font-weight:620;
+}
+.sgroup{
+  font-size:10.5px; text-transform:uppercase; letter-spacing:.07em;
+  color:var(--faint); font-weight:640; padding:15px 11px 5px;
+}
+#side .side-foot{margin-top:18px; padding:9px 11px 0; border-top:1px solid var(--rule2);
+  color:var(--faint); font-size:11px}
+main{margin-left:238px; transition:margin .16s ease}
+body.side-closed #side{transform:translateX(-100%)}
+body.side-closed main{margin-left:0}
+#side-scrim{display:none}
+@media(max-width:899px){
+  #side{box-shadow:0 8px 30px rgba(17,19,24,.14); transform:translateX(-100%)}
+  body.side-closed #side{transform:translateX(-100%)}
+  main{margin-left:0}
+  body:not(.side-closed) #side-scrim{
+    display:block; position:fixed; inset:56px 0 0 0; background:var(--scrim);
+    z-index:45;
+  }
+}
 .pill{
   display:inline-flex; align-items:center; gap:6px; font-size:11.5px;
   padding:4px 10px; border-radius:100px; border:1px solid var(--rule);

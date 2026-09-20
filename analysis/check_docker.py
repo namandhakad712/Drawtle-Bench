@@ -247,7 +247,74 @@ def main():
               "must match it.")
         return 1
     print(f"  PASS: version is consistent ({drift or _pkg_version()}).")
+
+    # Compose build paths. A `COPY` source is resolved against the SERVICE'S
+    # build context, not the repo root -- and Compose resolves `context:` and
+    # `dockerfile:` against the compose file's own directory. Two independent
+    # prefix bugs were each "fixed" separately and the build still failed,
+    # because nobody checked the resolution end to end: `context: .` +
+    # `COPY docker/egress_proxy.py` resolves to docker/docker/egress_proxy.py
+    # and every `compose build` died with "not found" -- which surfaced to the
+    # user as a 502 on the dashboard's Build action.
+    comp = _compose_paths()
+    if comp:
+        for c in comp:
+            print(f"  FAIL: docker compose build cannot resolve: {c}")
+        print("        A compose file that `config` validates can still fail at "
+              "build time; only this path check catches it.")
+        return 1
+    print("  PASS: every compose service's build context resolves every COPY source.")
     return 0
+
+
+def _compose_paths():
+    """Resolve each compose service's build context; report what does not exist.
+
+    Parses docker/docker-compose.yml with a minimal, strictly-structured reader
+    (this file is machine-maintained: services at indent 2, `build:` at indent
+    4, `context:`/`dockerfile:` at indent 6). For every service that has a
+    build block it then checks, for each COPY source in that service's
+    Dockerfile, that the source exists INSIDE the resolved context directory.
+    Returns a list of problems (empty when sound).
+    """
+    compose = os.path.join(ROOT, "docker", "docker-compose.yml")
+    if not os.path.exists(compose):
+        return ["docker/docker-compose.yml is missing"]
+    lines = open(compose, "r", encoding="utf-8").read().splitlines()
+
+    # Indices of indent-2 keys; the build block of a service is the text from
+    # its key line up to the next indent-2 key line.
+    keys = [i for i, ln in enumerate(lines)
+            if re.match(r"^  [^ ].*:$", ln)]
+    problems = []
+    for a, b in zip(keys, keys[1:] + [len(lines)]):
+        block = lines[a:b]
+        name = lines[a].strip()[:-1]
+        ctx = dkf = None
+        for ln in block:
+            m = re.match(r"^      (context|dockerfile):\s*(.+)$", ln)
+            if m:
+                if m.group(1) == "context":
+                    ctx = m.group(2).strip()
+                else:
+                    dkf = m.group(2).strip()
+        if ctx is None:          # not a service with a build block
+            continue
+        cdir = os.path.normpath(os.path.join(ROOT, "docker", ctx))
+        dock = os.path.normpath(os.path.join(cdir, dkf or ""))
+        if not os.path.isfile(dock):
+            problems.append(f"service '{name}': Dockerfile {os.path.relpath(dock, ROOT)} "
+                            f"does not exist (context {ctx!r})")
+            continue
+        for src in copied_paths(open(dock, "r", encoding="utf-8").read()):
+            if src.startswith("--"):
+                continue
+            s = os.path.normpath(os.path.join(cdir, src))
+            if not os.path.exists(s):
+                problems.append(f"service '{name}': COPY {src!r} resolves to "
+                                f"{os.path.relpath(s, ROOT)}, which does not exist "
+                                f"in the build context {ctx!r}")
+    return problems
 
 
 def _pkg_version():
