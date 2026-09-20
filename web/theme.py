@@ -393,6 +393,15 @@ img.strip:hover{border-color:var(--blue); transform:scale(1.06)}
 }
 .q:hover{background:var(--blue-bg); border-color:var(--blue-rule); color:var(--blue)}
 
+/* ---------- sortable table headers ---------- */
+th.sortable{cursor:pointer; user-select:none; white-space:nowrap}
+th.sortable:hover{color:var(--blue)}
+.sortind{display:inline-block; width:10px; margin-left:3px; font-size:9px;
+  color:var(--blue)}
+/* The indicator column is always present, so the header does not shift
+   sideways when a sort is applied. */
+th.sortable .sortind:empty::after{content:""; display:inline-block; width:1px}
+
 /* ---------- settings ---------- */.setrow{
   display:flex; align-items:flex-start; gap:14px; padding:13px 0;
   border-bottom:1px solid var(--rule2);

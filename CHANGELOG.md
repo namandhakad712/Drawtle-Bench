@@ -2,6 +2,29 @@
 
 ## v2.7.1 — the audit findings, verified and fixed
 
+### Results: filters, sorting, and retention that previews before it deletes
+The Results view listed every run and offered one destructive button. On a
+directory with more than a handful of runs that is a wall of rows and no way to
+ask a question of it.
+
+- **Filters** — free-text over run id / model / provider / status / note, plus
+  status, model and provider selects, with a live "N of M run(s) shown" count.
+  Filtering narrows the *view*, and the toolbar says so: exports still cover
+  every run as listed, because an export that silently honoured a filter would
+  produce a file that does not match its own name.
+- **Sortable columns.** Clicking a header sorts, clicking again reverses, and the
+  active column is marked. **A missing value always sorts last, in both
+  directions** — an unknown progress rate is not a zero, so it must not sit at
+  the bottom of a descending sort as though it were the smallest number.
+- **Retention with a preview.** "Delete every test run" and "delete runs older
+  than N days" both run a **dry run first**, list exactly what would go, and only
+  then offer a confirm button. A sweep that removes the wrong runs is
+  unrecoverable — a run's artifacts are the only copy there is — so the plan is
+  shown before it is executed rather than described in prose. When nothing
+  matches, the panel now says *why* (protected, still running) instead of a bare
+  "nothing to delete", which is a dead end next to a list of runs that plainly do
+  match.
+
 ### Also in this release: the control panel's own defects, found by using it
 Reported from the running dashboard. All four were real.
 

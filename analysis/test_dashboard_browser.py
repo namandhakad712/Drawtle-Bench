@@ -177,6 +177,79 @@ def main():
                   len(per_click) >= 2 and all(n == 1 for n in per_click),
                   f"dialogs per click: {per_click} (a rising count means "
                   f"handlers are stacking on the same element)")
+            # ---- Results: filters, sorting, and a retention PREVIEW --------
+            # Switch to TEST mode first. The committed mock runs are self-tests,
+            # so live mode correctly hides them and every table would be empty --
+            # which is the feature working, not a reason to weaken the test.
+            pg.click("#tg-test")
+            pg.wait_for_timeout(900)
+            check("the test-mode toggle is reflected in the header",
+                  pg.evaluate("() => document.querySelector('#tg-test')"
+                              ".getAttribute('aria-pressed')") == "true",
+                  "aria-pressed did not become true")
+            check("test mode shows its warning banner",
+                  pg.evaluate("() => !!document.querySelector('#banner .testbanner')"),
+                  "no banner: the page could be showing self-test data while "
+                  "looking like a normal view")
+
+            pg.click('nav.tabs button[data-view="results"]')
+            pg.wait_for_selector("#res-q")
+            rows_all = pg.eval_on_selector_all("#res-bad table tbody tr",
+                                               "els => els.length")
+            check("the results table renders rows to filter",
+                  rows_all >= 1, f"{rows_all} excluded row(s)")
+            pg.fill("#res-q", "mock-opt")
+            pg.wait_for_timeout(300)
+            rows_one = pg.eval_on_selector_all("#res-bad table tbody tr",
+                                               "els => els.length")
+            check("the search filter narrows the table",
+                  rows_one < rows_all and rows_one >= 1,
+                  f"{rows_all} -> {rows_one}")
+            pg.fill("#res-q", "")
+            pg.wait_for_timeout(250)
+            rows_back = pg.eval_on_selector_all("#res-bad table tbody tr",
+                                                "els => els.length")
+            check("clearing the filter restores every row",
+                  rows_back == rows_all, f"{rows_back} vs {rows_all}")
+
+            # Sort via the EXCLUDED table's header. The clean table renders an
+            # empty state here (results/ holds no clean runs), so it has no
+            # headers at all -- targeting `#view th` would find nothing.
+            pg.click('#res-bad th[data-sort="run_id"]')
+            pg.wait_for_timeout(250)
+            ind = pg.evaluate(
+                "() => Array.from(document.querySelectorAll('#res-bad .sortind'))"
+                ".map(e => e.textContent).join('')")
+            check("clicking a header marks that column as sorted",
+                  bool(ind.strip()), f"indicators: {ind!r}")
+
+            # The retention preview runs a DRY RUN on the server. It must either
+            # offer a confirm step, or explain why nothing matched -- and in
+            # neither case may it have deleted anything. A sweep that removes
+            # the wrong runs is unrecoverable, so the preview exists precisely so
+            # the plan is seen before it is executed.
+            #
+            # In this fixture every test run is a committed reference artifact,
+            # so the correct outcome is "nothing to delete, and here is why".
+            # Both outcomes are accepted; deleting is not.
+            pg.click('#view button[data-act="prune-preview"][data-prune="test"]')
+            pg.wait_for_timeout(2500)
+            state = pg.evaluate("""() => {
+              const out = document.querySelector('#prune-out');
+              if (!out) return {out: null};
+              return {hasGo: !!out.querySelector('button[data-act="prune-go"]'),
+                      text: (out.textContent || '').slice(0, 220)};
+            }""")
+            check("the retention preview offers a confirm step or explains why not",
+                  state["hasGo"] or "Nothing would be deleted" in (state["text"] or ""),
+                  f"preview output: {state}")
+            check("the preview deleted nothing",
+                  all(os.path.exists(os.path.join(ROOT, "results", f))
+                      for f in ("mock-opt.jsonl", "mock-opt.summary.json",
+                                "mock-stale.jsonl", "mock-stale.summary.json")),
+                  "a committed reference artifact is gone -- the preview "
+                  "executed instead of planning")
+
             br.close()
     finally:
         httpd.shutdown()
