@@ -371,6 +371,52 @@ def main():
         check("POST /api/docker refuses a non-enum action (no injection)",
               st == 400, str((st, bad)))
 
+        # ---- M6: analytics + integrity surfaces -------------------------
+        # These aggregate the same runs the rest of the panel reads, with the
+        # same honest status rule. The contract the views rely on: analytics
+        # returns per-provider aggregates + a histogram; integrity returns a
+        # per-run issue list and honest counts. An empty directory must not 500.
+        st, an = req("/api/analytics")
+        check("GET /api/analytics answers", st == 200 and "by_backend" in an,
+              str((st, an)))
+        check("analytics reports a run total",
+              isinstance(an.get("n_runs"), int), str(an))
+        check("analytics histogram has ten buckets",
+              isinstance(an.get("histogram"), list) and len(an["histogram"]) == 10,
+              str(an.get("histogram")))
+        st, ig = req("/api/integrity")
+        check("GET /api/integrity answers", st == 200 and "runs" in ig,
+              str((st, ig)))
+        check("integrity counts are consistent",
+              ig.get("n_runs") == ig.get("n_with_issues", 0)
+              + ig.get("n_clean", 0), str(ig))
+        # The suite runs against a TEMP results dir, so it must build its own
+        # fixture for the load-bearing integrity check: a run that has a summary
+        # (so it looks like a result) but no status sidecar -- exactly the
+        # "committed reference artifact" state that the no-sidecar rule exists
+        # for. If integrity ever calls that clean, the check has regressed.
+        _orphan_jsonl = os.path.join(results_dir, "cctest-orphan.jsonl")
+        _orphan_sum = os.path.join(results_dir, "cctest-orphan.summary.json")
+        with open(_orphan_jsonl, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"turn": 1, "episode": 0}) + "\n")
+        with open(_orphan_sum, "w", encoding="utf-8") as fh:
+            json.dump({"run_id": "cctest-orphan", "model": "x", "backend": "y",
+                       "status": "success", "n_turns": 1}, fh)
+        try:
+            st, ig2 = req("/api/integrity")
+            orphan = next((r for r in ig2["runs"]
+                           if r["run_id"] == "cctest-orphan"), None)
+            check("integrity flags a run whose status is not sidecar-backed",
+                  orphan is not None and orphan["issues"]
+                  and any("not backed by a sidecar" in i for i in orphan["issues"]),
+                  f"orphan={orphan}")
+            check("integrity does not flag an unknown run id",
+                  all("cctest-does-not-exist" != r["run_id"] for r in ig2["runs"]))
+        finally:
+            for p in (_orphan_jsonl, _orphan_sum):
+                if os.path.exists(p):
+                    os.remove(p)
+
         # ---- preflight --------------------------------------------------
         st, pf = req("/api/preflight?backend=intern&model=intern-s1")
         check("GET /api/preflight", st == 200, str(st))

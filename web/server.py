@@ -233,6 +233,123 @@ def list_runs(dir_, mode=None):
             "mode": mode, "counts": counts, "datasets": _datasets()}
 
 
+def analytics_report(dir_, mode=None):
+    """Aggregate the runs into something a chart can show.
+
+    Built on `list_runs` so it inherits the same honest status rule and the same
+    mode filter -- a mock run must never appear in a live analytics view. Group
+    by backend; an unknown progress rate is excluded from the average (it is not
+    a zero) and reported as `n_no_score` rather than dragged to the floor.
+    """
+    data = list_runs(dir_, mode=mode)
+    runs = data["runs"]
+    by_backend = {}
+    for r in runs:
+        b = r["backend"] or "(unknown)"
+        d = by_backend.setdefault(b, {"backend": b, "n": 0, "n_clean": 0,
+                                      "progress": [], "turns": 0,
+                                      "cost": 0.0, "cost_known": 0})
+        d["n"] += 1
+        if r["status"] == RS.STATUS_SUCCESS:
+            d["n_clean"] += 1
+        if r["progress_rate"] is not None:
+            d["progress"].append(r["progress_rate"])
+        d["turns"] += (r["n_turns"] or 0)
+        if r["total_cost_usd"] is not None:
+            d["cost"] += r["total_cost_usd"]
+            d["cost_known"] += 1
+    agg = []
+    for b, d in by_backend.items():
+        pr = d["progress"]
+        agg.append({
+            "backend": b, "n": d["n"], "n_clean": d["n_clean"],
+            "avg_progress": (sum(pr) / len(pr)) if pr else None,
+            "total_turns": d["turns"],
+            "total_cost": d["cost"],
+            "n_cost_known": d["cost_known"],
+        })
+    agg.sort(key=lambda x: -(x["avg_progress"] or 0))
+    # Histogram of progress rate, 10% buckets; an unknown score is its own bar.
+    buckets = [0] * 10
+    none_n = 0
+    for r in runs:
+        p = r["progress_rate"]
+        if p is None:
+            none_n += 1
+        else:
+            buckets[min(9, int(p * 10))] += 1
+    scored = [r["progress_rate"] for r in runs if r["progress_rate"] is not None]
+    return {
+        "dir": dir_, "mode": mode,
+        "n_runs": len(runs), "n_clean": data["n_success"],
+        "n_excluded": data["n_excluded"],
+        "avg_progress": (sum(scored) / len(scored)) if scored else None,
+        "total_turns": sum((r["n_turns"] or 0) for r in runs),
+        "total_cost": sum((r["total_cost_usd"] or 0) for r in runs),
+        "by_backend": agg,
+        "histogram": [{"bucket": f"{i*10}-{(i+1)*10}%", "n": buckets[i]}
+                      for i in range(10)],
+        "n_no_score": none_n,
+    }
+
+
+def integrity_report(dir_, mode=None):
+    """List the runs that are not what they claim to be, and why.
+
+    Every check reports rather than repairs: a truncated log, a missing sidecar,
+    a summary that disagrees with the log -- these are the states that quietly
+    corrupt an aggregate, so the surface exists to make them visible. Built on
+    `enumerate_runs` + `scan_jsonl` so it reads the same files the readers do.
+    """
+    tracked = tracked_runs(dir_)
+    rows = []
+    for run_id, run in ST.enumerate_runs(dir_).items():
+        s = run["summary"] or {}
+        st = run["record"] or {}
+        paths = run.get("paths") or RS.run_paths(dir_, run_id)
+        issues = []
+        # The status file is the live record; the summary is a frozen snapshot
+        # that keeps saying `success` after the run errored. A status that is
+        # not backed by a sidecar is the state the project's central rule
+        # refuses to trust, so the integrity surface flags it.
+        if run.get("status_source") not in ("status-file", "status-file-only"):
+            issues.append("status not backed by a sidecar (source: "
+                          + str(run.get("status_source")) + ")")
+        if run["summary"] is None:
+            issues.append("no summary file")
+        recs, health = RS.scan_jsonl(paths["jsonl"])
+        if health["exists"] and health["bad_lines"]:
+            tail = (" (last line incomplete -- process killed mid-write)"
+                    if health["truncated_tail"] else "")
+            issues.append(f"log has {len(health['bad_lines'])} unparseable "
+                          f"line(s){tail}")
+        if (run["status"] == RS.STATUS_SUCCESS and health["exists"]
+                and health["n_records"] == 0):
+            issues.append("marked success but the log is empty")
+        n_turns = s.get("n_turns") or st.get("n_turns")
+        if n_turns and health["n_records"] and health["n_records"] != n_turns:
+            issues.append(f"turn count mismatch: summary says {n_turns}, "
+                          f"log has {health['n_records']}")
+        run_mode, _ = RS.mode_of(st, s)
+        if mode is not None and run_mode != mode:
+            continue
+        rows.append({
+            "run_id": run_id,
+            "model": s.get("model") or st.get("model"),
+            "backend": s.get("backend") or st.get("backend"),
+            "status": run["status"],
+            "tracked": run_id in tracked,
+            "issues": issues,
+        })
+    rows.sort(key=lambda r: (not r["issues"], r["run_id"]))
+    return {
+        "dir": dir_, "mode": mode,
+        "runs": rows, "n_runs": len(rows),
+        "n_with_issues": sum(1 for r in rows if r["issues"]),
+        "n_clean": sum(1 for r in rows if not r["issues"]),
+    }
+
+
 def _datasets():
     """Manifest files a run could be launched against."""
     out = []
@@ -957,6 +1074,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(_system(self.results_dir))
             elif path == "/api/runs":
                 self._json(list_runs(self.results_dir, mode=_mode_arg(q)))
+            elif path == "/api/analytics":
+                self._json(analytics_report(self.results_dir, mode=_mode_arg(q)))
+            elif path == "/api/integrity":
+                self._json(integrity_report(self.results_dir, mode=_mode_arg(q)))
             elif path == "/api/leaderboard":
                 self._json(leaderboard(self.results_dir, mode=_mode_arg(q)))
             elif path == "/api/registry":

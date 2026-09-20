@@ -38,6 +38,7 @@
 <a href="changelog.html" class="on">Changelog</a>
 <a href="contributing.html">Contributing</a>
 <div class="grp">On this page</div><div class="toc">
+<a href="#v2.8.0-finishing-the-dashboard-m3m6">v2.8.0 — finishing the dashboard (M3–M6)</a>
 <a href="#v2.7.1-the-audit-findings-verified-and-fixed">v2.7.1 — the audit findings, verified and fixed</a>
 <a href="#v2.7.0-operability-per-session-folders-testlive-provenance-settings-and-a-doctor">v2.7.0 — operability: per-session folders, test/live provenance, settings, and a doctor</a>
 <a href="#v2.6.0-control-centre-live-provider-discovery-and-the-models-imported-from-two-agent-harnesses">v2.6.0 — control centre, live provider discovery, and the models imported from two agent harnesses</a>
@@ -55,6 +56,31 @@
 </nav>
 <main id="content">
 <h1 id="changelog">Changelog<a class="ah" href="#changelog" aria-label="link">#</a></h1>
+<h2 id="v2.8.0-finishing-the-dashboard-m3m6">v2.8.0 — finishing the dashboard (M3–M6)<a class="ah" href="#v2.8.0-finishing-the-dashboard-m3m6" aria-label="link">#</a></h2>
+<h3 id="m4-api-keys-in-the-ui">M4 — API keys in the UI<a class="ah" href="#m4-api-keys-in-the-ui" aria-label="link">#</a></h3>
+<p>The dashboard printed only the credentials path; setting a key meant the CLI or a hand-edited file. Added <code>GET/POST /api/keys</code> backed by the existing credential store, with a per-provider table in the System view (masked current value, <code>type=password</code> input, Save / Clear). <strong>No endpoint ever returns a key in full</strong> — <code>key_status()</code> runs every raw secret through <code>catalog.mask()</code> and only the masked form leaves the server. The credential path is now env-overridable (<code>DRAWTLE_CRED_FILE</code>) so the suite writes nowhere the user cares about.</p>
+<h3 id="m5-storyboard-frame-thumbnails-a-lightbox">M5 — storyboard frame thumbnails + a lightbox<a class="ah" href="#m5-storyboard-frame-thumbnails-a-lightbox" aria-label="link">#</a></h3>
+<p>The replay already rendered frames, but a 200px card hid the detail and there was no way to look closer; the storyboard showed text cards only.</p>
+<ul>
+<li>
+A click-to-zoom <strong>lightbox</strong> (CSS already existed; the behaviour was missing). One document-level delegated handler opens it for the replay filmstrip (<code>.strip</code>), the per-turn frame (<code>.frame-img</code>), and the storyboard thumbnails (<code>.sb-thumb-img</code>); Esc or a click outside closes it.
+</li>
+<li>
+<strong>Storyboard thumbnails</strong>: each card fetches its run's first frame from a new <code>GET /api/run/&lt;id&gt;/thumb</code> route, in parallel, into its own slot. A run with no frames keeps an empty slot — no broken-image icon. <code>first_frame()</code> walks the run's records and returns the first turn that carried a frame, reconstructed from the message pool exactly as <code>replay_json</code> does, so the thumbnail is the same image the replay shows.
+</li>
+</ul>
+<h3 id="m3-docker-control-from-the-ui">M3 — Docker control from the UI<a class="ah" href="#m3-docker-control-from-the-ui" aria-label="link">#</a></h3>
+<p>The System view's Docker panel was read-only. It is now actionable: <strong>Build image / Start container / Stop container</strong>, with live status (image built?, container running?). <code>docker_status()</code> and <code>docker_action()</code> shell out to the Docker CLI through <strong>fixed argv lists only</strong> — the POST body is checked against an enum (<code>build|start|stop</code>), so no command string from the client can reach <code>subprocess</code>. When Docker is absent the actions are withheld entirely and the panel says why. The docker probe runs <em>off the critical path</em>: the rest of the System view paints first, then the Docker body drops in, because <code>docker info</code> against a dead daemon can take seconds and must not pin the tab on a spinner.</p>
+<h3 id="m6-analytics-integrity-surfaces">M6 — analytics + integrity surfaces<a class="ah" href="#m6-analytics-integrity-surfaces" aria-label="link">#</a></h3>
+<p>Two new tabs.</p>
+<ul>
+<li>
+<strong>Analytics</strong> (<code>GET /api/analytics</code>): aggregates over the runs — per-provider progress rate, turns and cost, plus a 10-bucket progress histogram. Built on the same honest status rule (<code>list_runs</code>), so a mock run is excluded from a live view and an unknown score is never averaged as a zero.
+</li>
+<li>
+<strong>Integrity</strong> (<code>GET /api/integrity</code>): lists runs whose artifacts do not match their claims — status not backed by a sidecar, missing summary, unparseable log lines (with the "killed mid-write" signature), empty log claiming success, and turn-count mismatches between summary and log. Every check reports rather than repairs; the point is to make the states that silently corrupt an aggregate visible.
+</li>
+</ul>
 <h2 id="v2.7.1-the-audit-findings-verified-and-fixed">v2.7.1 — the audit findings, verified and fixed<a class="ah" href="#v2.7.1-the-audit-findings-verified-and-fixed" aria-label="link">#</a></h2>
 <h3 id="results-filters-sorting-and-retention-that-previews-before-it-deletes">Results: filters, sorting, and retention that previews before it deletes<a class="ah" href="#results-filters-sorting-and-retention-that-previews-before-it-deletes" aria-label="link">#</a></h3>
 <p>The Results view listed every run and offered one destructive button. On a directory with more than a handful of runs that is a wall of rows and no way to ask a question of it.</p>

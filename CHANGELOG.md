@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — finishing the dashboard (M3–M6)
+## v2.8.0 — finishing the dashboard (M3–M6)
 
 ### M4 — API keys in the UI
 The dashboard printed only the credentials path; setting a key meant the CLI
@@ -36,6 +36,19 @@ an enum (`build|start|stop`), so no command string from the client can reach
 panel says why. The docker probe runs *off the critical path*: the rest of the
 System view paints first, then the Docker body drops in, because `docker info`
 against a dead daemon can take seconds and must not pin the tab on a spinner.
+
+### M6 — analytics + integrity surfaces
+Two new tabs.
+- **Analytics** (`GET /api/analytics`): aggregates over the runs — per-provider
+  progress rate, turns and cost, plus a 10-bucket progress histogram. Built on
+  the same honest status rule (`list_runs`), so a mock run is excluded from a
+  live view and an unknown score is never averaged as a zero.
+- **Integrity** (`GET /api/integrity`): lists runs whose artifacts do not match
+  their claims — status not backed by a sidecar, missing summary, unparseable
+  log lines (with the "killed mid-write" signature), empty log claiming
+  success, and turn-count mismatches between summary and log. Every check
+  reports rather than repairs; the point is to make the states that silently
+  corrupt an aggregate visible.
 
 ## v2.7.1 — the audit findings, verified and fixed
 

@@ -368,6 +368,23 @@ img.strip:hover{border-color:var(--blue); transform:scale(1.06)}
 }
 .testbanner b{font-weight:660}
 
+/* ---------- analytics bars (M6) ---------- */
+.an-row{display:flex; align-items:center; gap:10px; margin:5px 0; font-size:12.5px}
+.an-lab{width:96px; flex:none; color:var(--ink); text-align:right;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.an-lab.tiny{width:64px; font-size:11.5px; color:var(--muted)}
+.an-track{flex:1; height:14px; background:var(--panel2); border-radius:4px;
+  overflow:hidden; border:1px solid var(--rule2)}
+.an-fill{display:block; height:100%; border-radius:3px}
+.an-fill.hi{background:var(--green)}
+.an-fill.mid{background:var(--blue)}
+.an-fill.lo{background:var(--amber-accent)}
+.an-fill.unk{background:repeating-linear-gradient(45deg,var(--muted),
+  var(--muted) 4px,var(--panel2) 4px,var(--panel2) 8px)}
+.an-val{width:62px; flex:none; text-align:left; color:var(--muted);
+  font-variant-numeric:tabular-nums}
+.an-val.tiny{width:34px; font-size:11.5px}
+
 /* ---------- lightbox ---------- */
 .lb-wrap{
   position:fixed; inset:0; background:var(--scrim); z-index:120;

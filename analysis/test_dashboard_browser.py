@@ -40,7 +40,8 @@ os.environ["DRAWTLE_SETTINGS_FILE"] = os.path.join(_TMP_CFG, "settings.json")
 PORT = 8491
 BASE = f"http://127.0.0.1:{PORT}"
 TABS = ("overview", "providers", "models", "launch", "results",
-        "replays", "storyboard", "logs", "system", "settings")
+        "replays", "storyboard", "analytics", "integrity", "logs",
+        "system", "settings")
 
 PASS, FAIL = [], []
 
@@ -305,6 +306,22 @@ def main():
             }""")
             check("Escape closes the lightbox", closed,
                   "the overlay was still present after Esc")
+
+            # ---- M6: analytics + integrity render -----------------------
+            # (Test mode is on from the Results section, so these aggregate the
+            # committed mock runs rather than an empty live view.)
+            pg.click('nav.tabs button[data-view="analytics"]')
+            pg.wait_for_selector("#view")
+            pg.wait_for_timeout(450)
+            an_txt = pg.inner_text("#view")
+            check("the Analytics view renders with a by-provider table",
+                  "Analytics" in an_txt and "By provider" in an_txt, an_txt[:140])
+            pg.click('nav.tabs button[data-view="integrity"]')
+            pg.wait_for_selector("#view")
+            pg.wait_for_timeout(450)
+            ig_txt = pg.inner_text("#view")
+            check("the Integrity view renders",
+                  "Integrity" in ig_txt, ig_txt[:140])
 
             br.close()
     finally:
