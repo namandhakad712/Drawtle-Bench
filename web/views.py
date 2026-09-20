@@ -2225,7 +2225,7 @@ RENDER.system = async function (v) {{
         show("system");
       }} catch (err) {{ toast(err.message, "bad"); }}
     }}
-    // Docker actions. The server only accepts build|up|proxy-on|proxy-off|
+    // Docker actions. The server only accepts build|proxy-on|proxy-off|
     // smoke|down (an enum, not a command string), so no shell input from the
     // client can reach subprocess.
     // The action's output streams into #dk-out, which lives OUTSIDE #dk-body,
@@ -2326,9 +2326,16 @@ RENDER.replays = async function (v) {{
     // The container may have been replaced while this was in flight; writing
     // to a node that is no longer in the document throws.
     if (!v.isConnected) return;
-    $("#rp-ep-count").textContent = (d.episodes || []).length + " episode(s)";
+    $("#rp-ep-count").textContent = (d.episodes || []).length + " episode(s)"
+        + (d.partial ? " \\u00b7 partial run (never wrote a summary)" : "");
+    // An episode may arrive as a bare id or as a row carrying its own fields
+    // (a partial run's per-episode progress). Take the id from whichever shape
+    // came in; rendering the row itself as the id is what turned a partial run's
+    // episodes into "episode [object Object]".
+    const epId = e => (e && e.episode !== undefined ? e.episode : e);
     $("#rp-ep-list").innerHTML = (d.episodes || []).map(ep =>
-      '<button class="btn" data-ep="' + ep + '">episode ' + ep + '</button>').join("")
+      '<button class="btn" data-ep="' + epId(ep) + '">episode ' + epId(ep)
+      + '</button>').join("")
       || '<span class="tiny faint">No recorded episodes.</span>';
   }}
   async function loadTurns(runId, ep) {{
@@ -2515,7 +2522,6 @@ function dockerPanelBody(dk) {{
     + (dk.docker_available
         ? '<button class="btn" data-act="dk-build">Build images</button>'
           + '<button class="btn" data-act="dk-smoke">Smoke-test</button>'
-          + '<button class="btn" data-act="dk-up">Start all</button>'
           + '<button class="btn" data-act="dk-proxy-on">Egress on</button>'
           + '<button class="btn" data-act="dk-proxy-off">Egress off</button>'
           + '<button class="btn" data-act="dk-down">Stop all</button>'
@@ -2527,15 +2533,16 @@ function dockerPanelBody(dk) {{
     + '</div>'
     + (dk.docker_available
         ? note('<b>Build</b> compiles both images (bench + egress proxy). '
-          + '<b>Smoke-test</b> runs the mock inside the container and streams '
-          + 'here \\u2014 verifies image, volumes, user and dataset before any '
-          + 'key is spent. <b>Egress on</b> starts the allow-list proxy; '
-          + '<b>Egress off</b> stops it. The <code>bench</code> service is a '
-          + 'one-shot: it runs and exits, so <b>Start all</b> shows it as '
-          + '"exited" \\u2014 that is the smoke test finishing, not a failure. '
-          + 'Runs from the Launch tab enter this container when you tick '
-          + '<b>run inside the sandbox container</b> there; localhost providers '
-          + 'stay on the host.', "info")
+          + '<b>Smoke-test</b> is the only action that runs the bench '
+          + 'container: it executes the mock inside it and streams here, '
+          + 'verifying image, volumes, user and dataset before any key is '
+          + 'spent. <b>Egress on</b> starts the allow-list proxy \\u2014 that '
+          + 'IS the sandbox environment being up; a sandboxed run from the '
+          + 'Launch tab does not need it, it uses <code>compose run</code> '
+          + 'directly. <b>Egress off</b> stops it. Runs from the Launch tab '
+          + 'enter this container when you tick '
+          + '<b>run inside the sandbox container</b> there; localhost '
+          + 'providers stay on the host.', "info")
         : note('<b>Docker is not installed or not reachable.</b> The container '
           + 'path in <code>docker/sandbox.md</code> cannot be executed here. The '
           + 'benchmark still runs on the host; this is OS-level assurance only. '

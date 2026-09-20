@@ -243,7 +243,18 @@ class ModelBackend:
             f"(the provider stalled after connecting; the socket is abandoned).")
 
     def complete(self, messages, temperature=0.0, max_tokens=256, **kw):
-        """Call the model with retries. Returns ModelResponse."""
+        """Call the model with retries. Returns ModelResponse.
+
+        The transient set includes `ConnectionError` and `http.client.
+        HTTPException` on purpose. `RemoteDisconnected` -- the peer closed the
+        connection without a response -- is both of those but is NOT a
+        `urllib.error.URLError`, so the old filter let it straight through and
+        one proxy hiccup terminated a whole live run at turn 58 of episode 6,
+        after real time and tokens were already spent. A dropped connection is
+        the textbook transient fault; a genuinely dead endpoint still fails
+        after `max_retries` and surfaces the last error.
+        """
+        import http.client
         self.require_key()
         last_err = None
         for attempt in range(self.max_retries + 1):
@@ -263,7 +274,8 @@ class ModelBackend:
                         time.sleep(min(wait, 30))
                         continue
                 raise
-            except (urllib.error.URLError, TimeoutError) as e:
+            except (urllib.error.URLError, TimeoutError,
+                    ConnectionError, http.client.HTTPException) as e:
                 last_err = e
                 if attempt < self.max_retries:
                     time.sleep(min(2 ** attempt, 30))

@@ -143,22 +143,26 @@ def main():
             # The panel must be present, and when Docker is not installed (this
             # machine) it must show its state and NOT offer actions -- offering a
             # Build button that can only fail would be false comfort. A real
-            # host with Docker gets the six buttons instead.
+            # host with Docker gets the five buttons instead.
             check("the System view shows the Docker control panel",
                   "Docker control" in sys_txt, sys_txt[:200])
             # The action buttons are all-or-nothing (docker present or
             # withheld) -- never partial, never runnable when the daemon is
             # down. The Refresh control is always there: it is how the user
             # re-probes after starting Docker Desktop without reloading.
+            # Five, not six: there is no "Start all". `compose up -d` starts
+            # the bench one-shot too, and its command is a full mock benchmark
+            # that would run into the operator's live results the moment they
+            # brought Docker up. A benchmark is an explicit act (Smoke-test),
+            # never a side effect of starting an environment.
             n_dk_actions = pg.eval_on_selector_all(
                 "#view button[data-act='dk-build'], "
                 "#view button[data-act='dk-smoke'], "
-                "#view button[data-act='dk-up'], "
                 "#view button[data-act='dk-proxy-on'], "
                 "#view button[data-act='dk-proxy-off'], "
                 "#view button[data-act='dk-down']", "els => els.length")
             check("Docker actions are all-or-nothing (present or withheld)",
-                  n_dk_actions in (0, 6), f"dk action buttons={n_dk_actions}")
+                  n_dk_actions in (0, 5), f"dk action buttons={n_dk_actions}")
             # The panel body fills ASYNCHRONOUSLY after the view paints (the
             # docker probe can take a couple of seconds), so wait for the
             # Refresh control rather than sampling the DOM early.

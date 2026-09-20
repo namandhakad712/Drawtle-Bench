@@ -110,10 +110,18 @@ class Handler(socketserver.BaseRequestHandler):
         self._relay(upstream)
 
     def _relay(self, upstream):
+        # A CONNECT tunnel for an LLM call is idle BY DESIGN while the provider
+        # computes the response. A vision model can sit silent for well over
+        # half a minute before its first byte, and a fixed 30s idle cap tore
+        # exactly those tunnels down mid-request -- killing whichever run had
+        # the misfortune to ask a slow model a hard question. The cap is now
+        # generous and configurable; the tunnel's own peers close it when the
+        # work is done, and this is only the reaper for a truly dead one.
+        idle = float(os.environ.get("EGRESS_IDLE_TIMEOUT_S", "600"))
         both = [self.request, upstream]
         try:
             while True:
-                r, _, _ = select.select(both, [], [], 30)
+                r, _, _ = select.select(both, [], [], idle)
                 if not r:
                     break
                 for s in r:

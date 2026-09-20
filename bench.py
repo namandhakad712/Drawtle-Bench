@@ -23,6 +23,33 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+
+def _utf8_stdio():
+    """Force UTF-8 on stdout/stderr, once, before any print.
+
+    The default Windows console codepage (cp1252 on an en-US install) cannot
+    encode the box-drawing characters this CLI and the control centre print in
+    their headers. On such a console the print itself raises
+    UnicodeEncodeError -- which killed `bench.py doctor` before it could print
+    a single verdict, and killed `bench.py serve` inside the startup health
+    check so the server never listened at all. A tool whose readiness command
+    and whose server both refuse to start on their operator's machine is not
+    production-ready, whatever the rest of the code does.
+
+    `reconfigure` is the standard-library way to set an opened stream's
+    encoding; it is a no-op on a stream already using UTF-8 (POSIX, a UTF-8
+    console, a redirected file). Best-effort: a stream that cannot be
+    reconfigured is left alone rather than blocking the command.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_utf8_stdio()
+
 from drawtle import dataset as D
 from drawtle import models as MOD
 from drawtle import runner as RUN

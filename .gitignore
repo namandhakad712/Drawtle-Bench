@@ -8,15 +8,29 @@ __pycache__/
 # and were one `git add -A` away from being committed. Anything a run produces
 # belongs here, so the rule is stated as a family rather than file by file.
 #
-# All of it is reproducible from `bench.py`; none of it is an input.
+# Both layouts: flat `results/<run_id>.<ext>` and nested
+# `results/<model>/<run_id>/<ext>`. The nested layout arrived after these rules
+# were written, and the gap left every nested run visible as untracked noise
+# after every run.
 results/*.jsonl
 results/*.jsonl.transcript.json
 results/*.summary.json
 results/*.status.json
 results/*.done.json
 results/*.html
+results/*/*.jsonl
+results/*/*.jsonl.transcript.json
+results/*/*.summary.json
+results/*/*.status.json
+results/*/*.done.json
+results/*/*.html
 results/dataset*.json
 results/frames/
+results/*/frames/
+
+# A per-model directory holding only ignored files is empty from git's point of
+# view; the directory itself is not tracked either.
+results/*/
 
 # Committed on purpose, so the list above does not hide them: the reference
 # fixtures the tests assert against. `!` must come after the exclusion.

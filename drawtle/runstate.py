@@ -47,6 +47,13 @@ STATUS_ERROR = "error"
 STATUS_INTERRUPTED = "interrupted"
 STATUS_UNKNOWN = "unknown"
 
+#: How hard `atomic_write_json` retries a transient lock on the publish step,
+#: and how long it backs off between attempts. Windows raises Access Denied
+#: when an antivirus or a polling reader holds the destination for a few ms;
+#: two real runs were lost to that before this existed.
+_REPLACE_ATTEMPTS = 5
+_REPLACE_BACKOFF_S = 0.05
+
 #: A run id is used as a file-name component in several places, and it reaches
 #: `os.path.join` directly in the delete path. This is the same shape the
 #: launch guard accepts (`guard._RUN_ID_RE`), duplicated here rather than
@@ -296,6 +303,30 @@ def migrate_flat_runs(out_dir, logs_dir=None, apply=False):
     return plan
 
 
+def _replace_with_retry(tmp, path):
+    """`os.replace`, retrying a transient lock on the destination.
+
+    On Windows the replace fails with `PermissionError`/Access Denied when
+    something briefly holds the destination open -- an antivirus scanning the
+    freshly written temp file, or a dashboard polling the results directory
+    mid-write. The lock is released milliseconds later; the alternative is a
+    run that dies after hours of progress because a scanner sneezed. Two real
+    runs were lost to exactly this before the retry existed.
+
+    Narrow on purpose: only a permission/lock error is retried, never a
+    missing directory or a full disk, which are permanent and must surface.
+    """
+    last = None
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as exc:
+            last = exc
+            time.sleep(_REPLACE_BACKOFF_S * (attempt + 1))
+    raise last
+
+
 def atomic_write_json(path, obj):
     """Write JSON so a concurrent reader sees either the old file or the new.
 
@@ -309,6 +340,9 @@ def atomic_write_json(path, obj):
     reading -- can open the same temp file and interleave into one corrupt
     document, which `os.replace` then publishes atomically. A unique name costs
     nothing and removes the race entirely.
+
+    The publish step retries a transient lock rather than failing the run; see
+    `_replace_with_retry`.
     """
     parent = os.path.dirname(os.path.abspath(path))
     if parent:
@@ -319,7 +353,7 @@ def atomic_write_json(path, obj):
             json.dump(obj, fh, indent=2)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        _replace_with_retry(tmp, path)
     except BaseException:
         # Never leave a stray temp file behind on a failure path -- a `.tmp`
         # next to a run's artifacts looks like a half-written result.

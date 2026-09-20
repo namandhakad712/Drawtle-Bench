@@ -584,15 +584,27 @@ def _get(url, key, auth, timeout):
         f"completed -- the provider is unreachable or not answering)")
 
 
-def probe_all(providers=None, timeout=12.0):
+def probe_all(providers=None, timeout=12.0, budget=60.0):
     """Probe every provider that has a discovery route. Sequential, on purpose.
 
     Parallel probes would be faster and would also make a rate limit on one
     provider look like a network fault on three, because the error arrives out
     of order. This is a setup screen, not a hot path.
+
+    Bounded: a probe of a dead host can take up to `timeout` seconds each, and
+    twenty providers at twelve seconds is a four-minute request that pins an
+    HTTP worker thread the whole way -- which is what starved the control
+    centre's other routes while a probe-all was running. A per-provider probe
+    still gets its full `timeout`; the *total* is capped, so the panel stays
+    responsive no matter how many providers are configured. `budget` is a
+    parameter rather than a constant only so a test can exercise the cap
+    without sleeping for a minute.
     """
     reg = merged_providers()
     names = sorted(providers if providers is not None else reg.keys())
+    # Enough to answer "which providers are reachable" without becoming a
+    # denial of service against the panel's own thread pool.
+    deadline = time.time() + (budget if budget is not None else 60.0)
     out = []
     for name in names:
         spec = reg.get(name) or {}
@@ -601,6 +613,15 @@ def probe_all(providers=None, timeout=12.0):
                         "models": [], "n": 0, "probed_at": None,
                         "error": "no discovery endpoint", "elapsed_ms": 0,
                         "key_source": None})
+            continue
+        if time.time() >= deadline:
+            # Report the ones not yet asked rather than pretending they were.
+            out.append({"ok": False, "provider": name,
+                        "endpoint": spec.get("models_url"),
+                        "models": [], "n": 0, "probed_at": None,
+                        "error": "skipped: the probe sweep reached its time "
+                                 "budget (retry to continue)",
+                        "elapsed_ms": 0, "key_source": None})
             continue
         out.append(probe(name, spec, timeout=timeout))
     return out

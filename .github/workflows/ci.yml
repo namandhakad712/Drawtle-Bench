@@ -48,6 +48,9 @@ jobs:
       - name: Control-centre HTTP surface (every route, incl. the ones that write)
         run: python analysis/test_control_centre.py
 
+      - name: Run failure recovery (retries, partial runs, write locks, probe bound)
+        run: python analysis/test_run_failure_recovery.py
+
       - name: Dashboard JS parses (node --check on the emitted <script>)
         run: python analysis/check_dashboard_js.py
 
