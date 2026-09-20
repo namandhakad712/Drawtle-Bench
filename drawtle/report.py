@@ -70,7 +70,9 @@ def _status_banner(summary, results_dir=None):
     status, note, _src = summary.get("status", RS.STATUS_UNKNOWN), None, "summary"
     if d:
         try:
-            status, note, _src = ST._effective_status(d, summary, "")
+            _rid = summary.get("run_id")
+            _rec = RS.read_status(d, _rid) if _rid else {}
+            status, note, _src = ST._effective_status(_rec, summary)
         except Exception:
             pass
     if status == RS.STATUS_SUCCESS:

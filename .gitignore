@@ -39,6 +39,10 @@ results/frames/
 e2e/
 .scratch/
 
+# ---- editor / tooling noise ------------------------------------------------
+# Dropped into the working directory by editor plugins, not by this project.
+thinking-effort-loaded.json
+
 # ---- runtime logs ----------------------------------------------------------
 # One logs/<run_id>.log per supervisor job (recreatable; not an input).
 logs/

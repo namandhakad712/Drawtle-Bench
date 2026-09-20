@@ -214,22 +214,20 @@ def rollup(results_dir, model=None, rederive=True):
     answer and is not. The unpriced runs are listed instead.
     """
     rows = []
-    for name in sorted(os.listdir(results_dir)):
-        if not name.endswith(".summary.json"):
-            continue
-        path = os.path.join(results_dir, name)
-        try:
-            with open(path, encoding="utf-8") as fh:
-                s = json.load(fh)
-        except (OSError, ValueError):
+    # Through `enumerate_runs` rather than a glob of `*.summary.json`: that glob
+    # only sees the legacy flat layout, so it would quietly stop counting every
+    # run written into its own directory -- and a cost total that silently omits
+    # half the runs is worse than no total.
+    for _rid, run in ST.enumerate_runs(results_dir).items():
+        s = run["summary"]
+        if s is None:
             continue
         if model and s.get("model") != model:
             continue
         stale = ("total_tokens" not in s) or ("status" not in s)
         if stale and rederive:
-            jsonl = os.path.join(results_dir, name[:-len(".summary.json")]
-                                 + ".jsonl")
-            if os.path.exists(jsonl):
+            jsonl = (run.get("paths") or {}).get("jsonl")
+            if jsonl and os.path.exists(jsonl):
                 s = _merge_derived(s, jsonl)
         rows.append(session_cost(s))
 

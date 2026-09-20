@@ -184,8 +184,14 @@ class Runner:
     """Runs a dataset against an LLMPolicy; writes audited JSONL trajectories."""
 
     def __init__(self, backend, config=None, reveal_optimal=False, frame_dir=None,
-                 run_id=None, navigate=False, resume=False, pool=None):
+                 run_id=None, navigate=False, resume=False, pool=None,
+                 run_mode=None):
         self.backend = backend
+        # `live` or `test`, stamped into the status and the summary. Defaults to
+        # the backend's nature so a caller that says nothing still gets the right
+        # answer -- a mock run is a self-test whether or not anyone remembers to
+        # label it. Note the name: `mode` is already the file-open mode below.
+        self.run_mode = run_mode or RS.infer_mode(getattr(backend, "name", None))
         self.config = dict(config or {})
         # navigation needs a larger cap: a 13x13 shortest path can exceed the probe's
         # turn budget, and an optimal agent must be able to finish.
@@ -370,7 +376,7 @@ class Runner:
     def _steps(turns):
         return sum(1 for r in turns if r["parsed_action"] and r["parsed_action"]["step"] == 1)
 
-    def run_dataset(self, manifest, out_jsonl, out_dir=None):
+    def run_dataset(self, manifest, out_jsonl, out_dir=None, paths=None):
         """Run every episode, writing a log that survives being interrupted.
 
         Three things this deliberately does that a naive loop does not:
@@ -384,12 +390,22 @@ class Runner:
            flushed per episode with an fsync, so at most one episode is lost and
            the truncation is detectable (`scan_jsonl` reports `truncated_tail`).
 
-        `out_dir` defaults to the directory holding `out_jsonl`; it is only used
-        for the sidecars (status/checkpoint/transcript).
+        `out_dir` is the results root, used for the sidecars
+        (status/checkpoint/transcript).
+
+        `paths` lets the caller decide the layout: the CLI passes the resolved
+        nested paths (`results/<model>/<run_id>/...`) so a run is written into
+        its own directory. A caller that passes nothing gets the layout already
+        on disk, which is what every older call site expects.
         """
         out_dir = out_dir or os.path.dirname(os.path.abspath(out_jsonl))
         os.makedirs(out_dir, exist_ok=True)
-        paths = RS.run_paths(out_dir, self.run_id)
+        paths = paths or RS.run_paths(out_dir, self.run_id)
+        # Create the run's own directory now, before anything resolves a path.
+        # Every sidecar lookup below goes through the layout resolver, and the
+        # resolver can only find a run directory that exists -- so the order
+        # here is load-bearing, not cosmetic.
+        os.makedirs(os.path.dirname(os.path.abspath(paths["jsonl"])), exist_ok=True)
         dataset_hash = manifest.get("hash")
 
         done, prev_hash = ({}, None)
@@ -409,6 +425,9 @@ class Runner:
             "dataset_hash": dataset_hash, "navigate": self.navigate,
             "config": self.config, "out_jsonl": out_jsonl,
             "resumed": bool(done),
+            # Provenance, not decoration: this is what stops a mock run being
+            # read as a real result once the file has left this machine.
+            "mode": self.run_mode,
         }
         # Record the isolation facts this run actually had. A Dockerfile in the
         # repo is not evidence that a container was used, and provenance that

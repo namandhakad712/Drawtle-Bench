@@ -6,9 +6,14 @@ render is a UI that breaks in the environment the benchmark is meant to run in.
 
 Design constraints this obeys:
 
-* **No dark surfaces.** The document is light, ink is near-black, and every
-  panel is a light tint. A benchmark reads numbers; numbers on a dark panel are
-  harder to read and print badly, and every figure in `results/` may be printed.
+* **Light by default, dark by explicit choice.** The document is light, ink is
+  near-black, and every panel is a light tint. A benchmark reads numbers; numbers
+  on a dark panel are harder to read and print badly, and every figure in
+  `results/` may be printed -- so light remains the default and the theme is not
+  taken from the OS. Dark mode exists because it was asked for, is remembered in
+  settings, and repaints the same components by swapping variables. The
+  reasoning above is not withdrawn; it is why dark is opt-in rather than
+  automatic.
 * **Colour carries meaning, and only one meaning each.** Green = a clean
   measurement, amber = excluded or unverified, red = failed, grey = unknown.
   No decorative colour, so a reader can trust that a coloured figure is telling
@@ -38,11 +43,19 @@ CSS = """
   --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
   --r:12px; --r2:8px; --r3:6px;
   --shadow:0 1px 2px rgba(17,19,24,.04),0 4px 16px rgba(17,19,24,.05);
+  /* Surfaces that a dark theme must be able to repaint. These were literal
+     hex values scattered through the sheet; naming them is what makes the
+     theme toggle a variable swap instead of a rewrite. */
+  --bg:#f7f8fa; --hover:#f6f8fb; --btnrule:#d2d7dd;
+  --gridline:rgba(17,19,24,.07);
+  --amber-accent:#d19b1a;
+  --toast-bg:#111318; --toast-ink:#fff;
+  --scrim:rgba(18,20,24,.34);
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{
-  font-family:var(--sans); color:var(--ink); background:#f7f8fa;
+  font-family:var(--sans); color:var(--ink); background:var(--bg);
   font-size:13.5px; line-height:1.5; -webkit-font-smoothing:antialiased;
 }
 a{color:var(--blue); text-decoration:none}
@@ -93,7 +106,7 @@ nav.tabs button[aria-selected=true]{background:var(--white); color:var(--blue); 
 }
 .pill b{font-weight:640}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none; box-shadow:0 0 0 3px rgba(0,0,0,.03)}
-.dot.g{background:var(--green)} .dot.a{background:#d19b1a}
+.dot.g{background:var(--green)} .dot.a{background:var(--amber-accent)}
 .dot.r{background:var(--red)}  .dot.n{background:var(--faint)}
 .dot.b{background:var(--blue)}
 
@@ -129,7 +142,7 @@ main{padding:26px 0 80px}
 .stat.good::before{background:var(--green)}
 .stat.warn{border-color:var(--amber-rule)}
 .stat.warn .v{color:var(--amber)}
-.stat.warn::before{background:#d19b1a}
+.stat.warn::before{background:var(--amber-accent)}
 .stat.bad{border-color:var(--red-rule)}
 .stat.bad .v{color:var(--red)}
 .stat.bad::before{background:var(--red)}
@@ -144,7 +157,7 @@ th{
 }
 td{padding:9px 13px; border-bottom:1px solid var(--rule2); vertical-align:top}
 tr:last-child td{border-bottom:0}
-tbody tr:hover{background:#f6f8fb}
+tbody tr:hover{background:var(--hover)}
 tbody tr.sel{background:var(--blue-bg)}
 td.num,th.num{text-align:right; font-variant-numeric:tabular-nums}
 .rank{color:var(--faint); font-variant-numeric:tabular-nums}
@@ -169,7 +182,7 @@ td.num,th.num{text-align:right; font-variant-numeric:tabular-nums}
   border-left:3px solid var(--rule); background:var(--panel2);
   padding:10px 13px; font-size:12px; color:var(--ink2); border-radius:0 var(--r2) var(--r2) 0;
 }
-.note.warn{border-left-color:#d19b1a; background:var(--amber-bg)}
+.note.warn{border-left-color:var(--amber-accent); background:var(--amber-bg)}
 .note.err{border-left-color:var(--red); background:var(--red-bg)}
 .note.ok{border-left-color:var(--green); background:var(--green-bg)}
 .note.info{border-left-color:var(--blue); background:var(--blue-bg)}
@@ -182,7 +195,7 @@ button.btn{
   border:1px solid var(--rule); background:var(--white); color:var(--ink);
   border-radius:var(--r2); font-weight:580; transition:border-color .12s, background .12s, box-shadow .12s;
 }
-button.btn:hover{background:var(--panel2); border-color:#d2d7dd}
+button.btn:hover{background:var(--panel2); border-color:var(--btnrule)}
 button.btn.primary{background:var(--blue); border-color:var(--blue); color:#fff}
 button.btn.primary:hover{background:#1d4a99}
 button.btn.danger{color:var(--red); border-color:var(--red-rule)}
@@ -236,7 +249,7 @@ pre.log{
 .empty{padding:36px 20px; text-align:center; color:var(--muted); font-size:13px}
 .bar{height:6px; background:var(--panel2); border-radius:4px; overflow:hidden; min-width:56px}
 .bar > i{display:block; height:100%; background:var(--green)}
-.bar.warn > i{background:#d19b1a}
+.bar.warn > i{background:var(--amber-accent)}
 .tabs2{display:flex; gap:5px; border-bottom:1px solid var(--rule); margin-bottom:13px; flex-wrap:wrap}
 .tabs2 button{
   font:inherit; font-size:12.5px; border:0; background:none; cursor:pointer;
@@ -248,7 +261,7 @@ pre.log{
 .kv .v{font-family:var(--mono); font-size:11.5px; word-break:break-all}
 .toast{
   position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:100;
-  background:var(--ink); color:#fff; font-size:12.5px; padding:10px 18px;
+  background:var(--toast-bg); color:var(--toast-ink); font-size:12.5px; padding:10px 18px;
   border-radius:100px; box-shadow:0 6px 24px rgba(0,0,0,.24); max-width:88vw;
   animation:pop .18s ease-out;
 }
@@ -267,7 +280,7 @@ pre.log{
 /* Quarter gridlines behind the bars, so a 60% bar is visibly 60% of the
    track and not "most of whatever width happens to be left". */
 .lb-grid{position:absolute; inset:0; pointer-events:none}
-.lb-grid i{position:absolute; top:0; bottom:0; width:1px; background:rgba(17,19,24,.07)}
+.lb-grid i{position:absolute; top:0; bottom:0; width:1px; background:var(--gridline)}
 /* The 95% CI as a shaded band the bar sits inside: a wide band is read as
    "somewhere in here", which is the honest reading of a per-episode interval. */
 .lb-band{
@@ -334,4 +347,91 @@ img.strip:hover{border-color:var(--blue); transform:scale(1.06)}
 .batchbar b{font-weight:650}
 .batchbar .spacer{flex:1}
 .batchbar button{margin-left:6px}
+
+/* ---------- test mode banner ---------- */
+/* Loud on purpose. A mock run scores ~100% by construction, so a view that is
+   showing self-test data while looking like a normal view is the most
+   misleading state this panel can be in. The banner exists so that state is
+   never ambiguous. */
+.testbanner{
+  display:flex; align-items:center; gap:10px; padding:10px 14px; margin:0 0 16px;
+  background:var(--amber-bg); border:1px solid var(--amber-rule);
+  border-left:4px solid var(--amber-accent); border-radius:var(--r2);
+  color:var(--amber); font-size:12.5px;
+}
+.testbanner b{font-weight:660}
+
+/* ---------- lightbox ---------- */
+.lb-wrap{
+  position:fixed; inset:0; background:var(--scrim); z-index:120;
+  display:flex; align-items:center; justify-content:center; padding:34px;
+  cursor:zoom-out;
+}
+.lb-inner{
+  background:var(--white); border-radius:var(--r); padding:12px;
+  max-width:min(1100px,94vw); max-height:92vh; overflow:auto; cursor:default;
+  box-shadow:0 18px 60px rgba(0,0,0,.34);
+}
+.lb-inner img{max-width:100%; max-height:78vh; display:block; border-radius:var(--r3)}
+.lb-cap{
+  display:flex; align-items:center; gap:10px; padding:9px 3px 2px;
+  font-size:12px; color:var(--muted);
+}
+.lb-cap .spacer{flex:1}
+
+/* ---------- field tooltips ----------
+   Every launch field carries a "?" whose title repeats its own help text. The
+   help text stays on the page -- the tooltip is for a reader who has already
+   scrolled past it and just wants to know what "stale lag" means without
+   hunting. */
+.q{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:14px; height:14px; margin-left:4px; border-radius:50%;
+  background:var(--panel2); border:1px solid var(--rule); color:var(--muted);
+  font-size:10px; font-weight:700; cursor:help; vertical-align:1px;
+  user-select:none;
+}
+.q:hover{background:var(--blue-bg); border-color:var(--blue-rule); color:var(--blue)}
+
+/* ---------- settings ---------- */.setrow{
+  display:flex; align-items:flex-start; gap:14px; padding:13px 0;
+  border-bottom:1px solid var(--rule2);
+}
+.setrow:last-child{border-bottom:0}
+.setrow .lab{flex:1; min-width:0}
+.setrow .lab b{display:block; font-weight:620; font-size:12.8px}
+.setrow .lab span{color:var(--muted); font-size:11.8px}
+.setrow .ctl{flex:none; min-width:170px; display:flex; justify-content:flex-end}
+.setrow select,.setrow input[type=number],.setrow input[type=text]{
+  min-width:150px; max-width:230px;
+}
+
+/* ---------- dark theme ----------
+   The document is repainted by swapping these variables, so every component
+   above is themed by construction rather than by a second stylesheet.
+
+   Note for the record: the original design argued *against* dark surfaces on
+   the grounds that numbers read worse on dark panels and print badly. That
+   reasoning still holds for anything that gets printed -- which is why light
+   remains the default and dark is an explicit, remembered choice rather than
+   something the OS silently imposes. */
+[data-theme="dark"]{
+  --ink:#e8eaef; --ink2:#c3c8d2; --muted:#98a0ad; --faint:#78818f;
+  --rule:#2c313a; --rule2:#24282f; --panel:#1a1d23; --panel2:#20242b;
+  --white:#1f232a; --tint:#1c2634;
+  --green:#4cc38a; --green-bg:#14261e; --green-rule:#24503a;
+  --red:#f0796c;   --red-bg:#2a1a18;   --red-rule:#552e29;
+  --amber:#e0b25c; --amber-bg:#2a2313; --amber-rule:#574722;
+  --blue:#6ea8f5;  --blue-bg:#16243a;  --blue-rule:#2b4568;
+  --violet:#b49bec;--violet-bg:#211a2e;--violet-rule:#3f3357;
+  --bg:#111318; --hover:#22262d; --btnrule:#333941;
+  --gridline:rgba(232,234,239,.10);
+  --amber-accent:#e0b25c;
+  --toast-bg:#e8eaef; --toast-ink:#111318;
+  --scrim:rgba(6,7,9,.62);
+  --shadow:0 1px 2px rgba(0,0,0,.28),0 4px 16px rgba(0,0,0,.34);
+}
+[data-theme="dark"] .lb-inner{box-shadow:0 18px 60px rgba(0,0,0,.6)}
+[data-theme="dark"] button.btn.primary{color:#0d1117}
+[data-theme="dark"] button.btn.primary:hover{background:#5c98e8; border-color:#5c98e8}
 """

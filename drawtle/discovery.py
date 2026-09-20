@@ -143,7 +143,17 @@ def _config_root():
 
 
 OVERLAY_DIR = os.path.join(_config_root(), "drawtle-bench")
-OVERLAY_FILE = os.path.join(OVERLAY_DIR, "overlay.json")
+
+#: Overridable so a TEST can point the overlay at a throwaway file.
+#:
+#: This exists because of a real incident: the test suite exercised add/remove
+#: against the user's actual overlay and its restore-on-exit step was not enough
+#: -- a failure part-way through left their curated model list reset. A test
+#: that can rewrite the user's own configuration is a test that will eventually
+#: destroy it. With this override the suite runs against a temp file and the
+#: user's overlay is never opened for writing at all.
+OVERLAY_FILE = (os.environ.get("DRAWTLE_OVERLAY_FILE")
+                or os.path.join(OVERLAY_DIR, "overlay.json"))
 
 #: Serialises overlay writes. Re-entrant so `mutate_overlay` can hold it across
 #: a read-modify-write while `save_overlay` re-acquires it for the write itself.

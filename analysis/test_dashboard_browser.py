@@ -19,6 +19,7 @@ runs on machines without a browser.
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -28,10 +29,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+# Throwaway overlay and settings, set BEFORE the drawtle imports read them. This
+# suite drives the Settings tab, which writes settings -- so without this it
+# would edit the user's real preferences. A test must not be able to change
+# someone's configuration, however convenient that is to write.
+_TMP_CFG = tempfile.mkdtemp(prefix="drawtle-browser-cfg-")
+os.environ["DRAWTLE_OVERLAY_FILE"] = os.path.join(_TMP_CFG, "overlay.json")
+os.environ["DRAWTLE_SETTINGS_FILE"] = os.path.join(_TMP_CFG, "settings.json")
+
 PORT = 8491
 BASE = f"http://127.0.0.1:{PORT}"
 TABS = ("overview", "providers", "models", "launch", "results",
-        "replays", "storyboard", "logs", "system")
+        "replays", "storyboard", "logs", "system", "settings")
 
 PASS, FAIL = [], []
 
@@ -60,6 +69,12 @@ def main():
                        cwd=ROOT, capture_output=True)
 
     httpd, _sup = S.make_server("results", "127.0.0.1", PORT)
+    # Mirror `serve()`: the health check runs at startup and seeds the cached
+    # machine facts (docker, rasteriser). Skipping it left the first
+    # `/api/system` to pay that cost cold -- up to eight seconds of docker probe
+    # plus a real rasterisation -- which made this test flaky on a loaded
+    # machine and, worse, made it unrepresentative of what a user sees.
+    S._startup_health("results")
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     time.sleep(0.6)
 
@@ -102,6 +117,34 @@ def main():
 
             check("no javascript error was raised on any tab", not errors,
                   "; ".join(errors[:5]))
+
+            # Launch: choosing a provider must narrow the model list to that
+            # provider's models. Asserted rather than assumed -- the whole point
+            # of the control is that a run cannot be aimed at the wrong endpoint.
+            pg.click('nav.tabs button[data-view="launch"]')
+            pg.wait_for_selector("#l-backend")
+            total = pg.eval_on_selector_all("#l-model-list option", "els => els.length")
+            narrowed = pg.evaluate("""() => {
+              const sel = document.querySelector('#l-backend');
+              for (const o of Array.from(sel.options)) {
+                sel.value = o.value;
+                sel.dispatchEvent(new Event('change'));
+                const n = document.querySelectorAll('#l-model-list option').length;
+                if (n > 0 && n < 90) return {provider: o.value, n: n};
+              }
+              return null;
+            }""")
+            check("the model list is provider-filtered",
+                  bool(narrowed) and narrowed["n"] < total,
+                  f"all providers={total}, best filter={narrowed}")
+
+            # Every launch field must carry a tooltip.
+            tips = pg.evaluate(
+                "() => document.querySelectorAll('#view label.f .q').length")
+            fields = pg.evaluate(
+                "() => document.querySelectorAll('#view label.f').length")
+            check("every launch field has a tooltip",
+                  fields > 0 and tips == fields, f"{tips} tooltips / {fields} fields")
             br.close()
     finally:
         httpd.shutdown()

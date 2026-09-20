@@ -8,11 +8,18 @@ import json
 import os
 import sys
 
-RESULTS = os.path.join(os.path.dirname(__file__), "..", "results")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+RESULTS = os.path.join(ROOT, "results")
+
+from drawtle import runstate as RS          # noqa: E402
 
 
 def _load(run_id):
-    p = os.path.join(RESULTS, f"{run_id}.summary.json")
+    # Through the resolver, so this gate keeps working whichever layout the
+    # runs were written in. A hardcoded filename here would make CI pass by
+    # finding nothing and comparing two defaults.
+    p = RS.run_paths(RESULTS, run_id)["summary"]
     with open(p, "r", encoding="utf-8") as fh:
         return json.load(fh)
 

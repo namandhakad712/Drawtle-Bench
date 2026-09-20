@@ -171,9 +171,15 @@ def delete_provider(name):
     A shipped provider gets a tombstone rather than being erased, so the removal
     is visible in the overlay and can be undone by editing one file. A provider
     that only ever existed in the overlay is dropped outright.
+
+    Idempotent, like `delete_model`: hiding something already hidden is the
+    state the caller asked for, not an error.
     """
     providers = DSC.merged_providers()
+    overlay = DSC.load_overlay()
     if name not in providers:
+        if name in (overlay.get("removed_providers") or []):
+            return True, "already hidden", True
         return False, f"no provider called {name!r}", False
     shipped = bool(CAT._read_registry_file().get("providers", {}).get(name))
 
@@ -308,9 +314,20 @@ def save_model(payload):
 
 
 def delete_model(mid):
-    """Hide a model. Returns (ok, message)."""
+    """Hide a model. Returns (ok, message).
+
+    Idempotent on purpose. Deleting a model that is already hidden succeeds: the
+    caller asked for a state, and that state holds. Treating it as an error was
+    a real defect -- a batch delete that included an already-hidden id, or a
+    second click on the same row, produced a 400 and a red toast for an outcome
+    that was exactly what the user wanted. The genuinely invalid case is an id
+    that has never existed, and that is still refused.
+    """
     models = DSC.merged_models()
+    overlay = DSC.load_overlay()
     if mid not in models:
+        if mid in (overlay.get("removed_models") or []):
+            return True, "already hidden"
         return False, f"no model called {mid!r}"
     shipped = mid in (CAT._read_registry_file().get("models") or {})
 
