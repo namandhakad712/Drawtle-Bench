@@ -87,7 +87,7 @@ Both bugs compounded: the proxy broke the socket, the retry loop refused to retr
 | L5 | **CI lacks lint, type, and packaging checks.** No ruff/mypy/pyright step; no packaging smoke test. | `.github/workflows/` | Read-only inspection. | Add lint/type/packaging gates to CI. |
 | L6 | **No release or deployment workflow.** | `.github/workflows/`, `pyproject.toml` | Read-only inspection. | Add a release workflow or document manual steps. |
 | L7 | **Unpinned optional dependencies.** `cairosvg` and `playwright` are unpinned in `pyproject.toml`. | `pyproject.toml` | Read-only inspection. | Pin versions or add a constraints file. |
-| L8 | **`bench.py` imports the web stack unconditionally.** `bench.py:63` imports `web.server` at module load. Every CLI subcommand (`generate`, `leaderboard`, etc.) pays the cost of importing the entire web stack, coupling unrelated commands to web-side health. | `bench.py:63` | Read-only inspection. | Move the import into `cmd_serve`. |
+| L8 | **No `--no-vision` CLI flag.** | `bench.py` argument parser | Read-only inspection. | Add a `--no-vision` flag for text-only baseline runs. |
 
 ---
 
