@@ -141,15 +141,32 @@ def main():
             # host with Docker gets the three buttons instead.
             check("the System view shows the Docker control panel",
                   "Docker control" in sys_txt, sys_txt[:200])
-            dk_avail = pg.evaluate(
-                "() => !!document.querySelector('#view .tag') "
-                "&& /available/.test(document.querySelector('#view').innerText)")
+            # The three action buttons are all-or-nothing (docker present or
+            # withheld) -- never partial, never runnable when the daemon is
+            # down. The Refresh control is always there: it is how the user
+            # re-probes after starting Docker Desktop without reloading.
             n_dk_actions = pg.eval_on_selector_all(
-                "#view button[data-act^='dk-']", "els => els.length")
-            # Either three actions (docker present) or zero (withheld) -- never
-            # a partial set, and never actions that cannot run.
+                "#view button[data-act='dk-build'], "
+                "#view button[data-act='dk-test'], "
+                "#view button[data-act='dk-stop']", "els => els.length")
             check("Docker actions are all-or-nothing (present or withheld)",
-                  n_dk_actions in (0, 3), f"dk buttons={n_dk_actions}")
+                  n_dk_actions in (0, 3), f"dk action buttons={n_dk_actions}")
+            # The panel body fills ASYNCHRONOUSLY after the view paints (the
+            # docker probe can take a couple of seconds), so wait for the
+            # Refresh control rather than sampling the DOM early.
+            try:
+                pg.wait_for_selector(
+                    "#view button[data-act='dk-refresh']", timeout=25000)
+                refresh_ok = True
+            except Exception:                                  # noqa: BLE001
+                refresh_ok = False
+            check("the Docker panel always offers a live refresh",
+                  refresh_ok, "no dk-refresh control appeared")
+            pg.click('nav.tabs button[data-view="launch"]')
+            pg.wait_for_selector("#l-sandbox", timeout=8000)
+            check("the Launch form offers the sandbox container option",
+                  pg.evaluate("() => !!document.querySelector('#l-sandbox')"),
+                  "no sandbox checkbox on the launch form")
 
 
             # Launch: choosing a provider must narrow the model list to that

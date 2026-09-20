@@ -844,9 +844,15 @@ def docker_status():
 
 def docker_action(action):
     """Run a Docker control action. Returns (ok, output, status_dict)."""
+    # `test` runs the compose bench service in the foreground (`run --rm -T`),
+    # which is the service's own smoke test: mock backend, no network, verifies
+    # the image, the volumes, the non-root user and the dataset before any key
+    # is spent. It streams to the panel instead of `up -d`, which would start
+    # the one-shot command and instantly report a stopped container for
+    # something that is actually fine.
     cmds = {
         "build": ["compose", "-f", _COMPOSE, "build"],
-        "start": ["compose", "-f", _COMPOSE, "up", "-d"],
+        "test":  ["compose", "-f", _COMPOSE, "run", "--rm", "-T", "bench"],
         "stop":  ["compose", "-f", _COMPOSE, "down"],
     }
     if action not in cmds:
@@ -1239,8 +1245,11 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._err(str(e), 400)
                 return self._json({"ok": True, "favorites": favs})
             if path == "/api/provider/delete":
-                ok, msg, _ = G.delete_provider(str(body.get("name") or ""))
-                return self._json({"ok": ok, "message": msg}, code=200 if ok else 400)
+                ok, msg, _shipped, n_hidden = G.delete_provider(
+                    str(body.get("name") or ""))
+                return self._json({"ok": ok, "message": msg,
+                                   "n_models_hidden": n_hidden},
+                                  code=200 if ok else 400)
             if path == "/api/provider/reset":
                 had = G.reset_provider(str(body.get("name") or ""))
                 return self._json({"ok": True, "had_override": had})
@@ -1320,8 +1329,8 @@ class _Handler(BaseHTTPRequestHandler):
                                    "probed": len(results)})
             if path == "/api/docker":
                 action = str(body.get("action") or "").strip()
-                if action not in ("build", "start", "stop"):
-                    return self._err("action must be build|start|stop", 400)
+                if action not in ("build", "test", "stop"):
+                    return self._err("action must be build|test|stop", 400)
                 ok, out, st = docker_action(action)
                 return self._json({"ok": ok, "output": out, "status": st},
                                   code=200 if ok else 502)

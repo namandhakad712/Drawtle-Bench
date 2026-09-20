@@ -26,6 +26,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+# The suite tests the SHIPPED registry and the cost arithmetic, so it must run
+# against an EMPTY overlay and its own settings -- NOT the operator's real ones.
+# A user who has hidden models on the dashboard (the overlay's `removed_models`
+# is exactly that) would otherwise silently turn "priced model -> cost_known
+# true" red, and the failure would read as a code bug when it is the suite
+# reading someone's edits.
+_TMP_CFG = tempfile.mkdtemp(prefix="drawtle-acc-cfg-")
+os.environ["DRAWTLE_OVERLAY_FILE"] = os.path.join(_TMP_CFG, "overlay.json")
+os.environ["DRAWTLE_SETTINGS_FILE"] = os.path.join(_TMP_CFG, "settings.json")
+os.environ["DRAWTLE_CRED_FILE"] = os.path.join(_TMP_CFG, "credentials.json")
+
 from drawtle import catalog as CAT
 from drawtle import cost as CO
 from drawtle import dataset as D

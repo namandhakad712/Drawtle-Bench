@@ -1242,6 +1242,15 @@ RENDER.launch = async function (v) {{
     + 'forward and episodes run until it arrives, so completion and path '
     + 'efficiency become measurable. Turn budgets are larger in this mode '
     + 'because a real shortest path can be long.">?</span></label>'
+    + '<label class="check"><input type="checkbox" id="l-sandbox">'
+    + ' run inside the sandbox container'
+    + ' <span class="tiny faint" id="l-sandbox-hint" title="Runs bench.py inside '
+    + 'the Docker container from docker/sandbox.md instead of on the host: an '
+    + 'unprivileged user, no host filesystem beyond the mounted volumes, and '
+    + 'network egress only through the allow-list proxy. The container writes '
+    + 'results into the same results/ volume, so the dashboard reads them '
+    + 'normally. Not available for localhost/self-hosted providers \u2014 the '
+    + 'container cannot reach your machine.">?</span></label>'
     + '<div class="row" style="margin-top:14px">'
     + '<button class="btn primary" id="l-go">Start run</button>'
     + '<button class="btn" id="l-check">Check setup first</button>'
@@ -1320,6 +1329,7 @@ RENDER.launch = async function (v) {{
       effort: $("#l-effort").value || null,
       frames: $("#l-frames").checked,
       navigate: $("#l-nav").checked,
+      sandbox: $("#l-sandbox") && $("#l-sandbox").checked,
     }};
     if (!body.model) return toast("a model id is required", "bad");
     $("#l-go").disabled = true;
@@ -2031,15 +2041,18 @@ RENDER.system = async function (v) {{
       + 'What the container adds is assurance about everything else on the machine, '
       + 'not about the model.', "info"));
 
-  // The Docker panel is now actionable (M3): build / start / stop the sandbox
-  // container from the UI, with live status. The body is filled separately
-  // after this view paints, because probing docker can be slow. When Docker is
-  // absent the actions are withheld entirely -- the panel must never imply a
-  // container can be run when the daemon is down. docker_status() reports that
-  // state honestly.
-  html += panel("Docker control", "checking…",
+  // The Docker panel is actionable (M3/M3.1): build / smoke-test / stop, plus
+  // a live Refresh. The body fills separately after this view paints (probing
+  // docker can be slow) and refills on Refresh and after every action. The
+  // action output <pre> sits OUTSIDE #dk-body so a status refresh never wipes
+  // the last command's output.
+  html += panel("Docker control", "live status",
     '<div id="dk-body"><div class="empty"><span class="spin"></span> '
-    + 'checking docker state…</div></div>');
+    + 'checking docker state…</div></div>'
+    + '<pre id="dk-out" class="mono tiny" style="white-space:pre-wrap;'
+    + 'max-height:220px;overflow:auto;background:var(--panel);border:1px solid'
+    + ' var(--rule);border-radius:6px;padding:9px;margin:6px 0 0">'
+    + '(no docker command run yet)</pre>');
 
   // The rasteriser is the difference between "a vision run works" and "a vision
   // run silently sends text only". It is also per-interpreter, so the check
@@ -2132,20 +2145,9 @@ RENDER.system = async function (v) {{
   // Fill the Docker panel now, off the critical path. `docker info` against a
   // dead daemon is slow; painting the rest of the view first and dropping the
   // result in here keeps the System tab responsive. The buttons it adds are
-  // caught by the delegated handler below (they live inside `v`).
-  (async () => {{
-    try {{
-      const dk = await apiWithRetry("/api/docker");
-      const el = $("#dk-body", v);
-      if (!el || !v.isConnected) return;
-      el.innerHTML = dockerPanelBody(dk);
-    }} catch (e) {{
-      const el = $("#dk-body", v);
-      if (el && v.isConnected)
-        el.innerHTML = '<div class="note err">Could not read docker state: '
-          + esc(e.message) + '</div>';
-    }}
-  }})();
+  // caught by the delegated handler below (they live inside `v`). fillDocker
+  // is also what Refresh and the post-action refresh call.
+  fillDocker(v);
 
   const reloadBtn = $("#sys-reload");
   if (reloadBtn) {{
@@ -2189,12 +2191,16 @@ RENDER.system = async function (v) {{
         show("system");
       }} catch (err) {{ toast(err.message, "bad"); }}
     }}
-    // M3: build / start / stop the sandbox container. The action is dispatched
-    // to the server, which only accepts build|start|stop, so no shell string
-    // from the client can reach subprocess. The output (docker's own log) is
-    // shown in place; Reload refreshes the status row above.
+    // Docker actions. The server only accepts build|test|stop (an enum, not a
+    // command string), so no shell input from the client can reach subprocess.
+    // The action's output streams into #dk-out, which lives OUTSIDE #dk-body,
+    // so refreshing the status afterwards (fillDocker) never wipes it.
     const dkact = e.target.closest("[data-act^='dk-']");
     if (dkact) {{
+      if (dkact.dataset.act === "dk-refresh") {{
+        fillDocker(v);
+        return;
+      }}
       const action = dkact.dataset.act.slice(3);     // dk-build -> build
       const out = $("#dk-out", v);
       if (out) out.textContent = action + " \u2026 (this can take a few minutes)";
@@ -2210,6 +2216,7 @@ RENDER.system = async function (v) {{
         if (out) out.textContent = "error: " + err.message;
         toast(err.message, "bad");
       }}
+      fillDocker(v);          // live status: image built / container state
       return;
     }}
   }});
@@ -2463,23 +2470,44 @@ function dockerPanelBody(dk) {{
     + '</div>'
     + '<div class="toolbar" style="margin:8px 0 4px">'
     + (dk.docker_available
-        ? '<button class="btn" data-act="dk-build">Build image</button>'
-          + '<button class="btn" data-act="dk-start">Start container</button>'
+        ? '<button class="btn" data-act="dk-build">Build images</button>'
+          + '<button class="btn" data-act="dk-test">Smoke-test container</button>'
           + '<button class="btn" data-act="dk-stop">Stop container</button>'
-        : '<span class="tiny dim">Actions disabled: Docker is not installed or '
-          + 'not reachable.</span>')
+        : '<span class="tiny dim">Docker not reachable. Start Docker Desktop '
+          + '(it takes a minute), then hit Refresh.</span>')
+    + '<button class="lnk" data-act="dk-refresh" style="margin-left:auto">'
+      + 'refresh status</button>'
     + '</div>'
-    + '<pre id="dk-out" class="mono tiny" style="white-space:pre-wrap;'
-    + 'max-height:200px;overflow:auto;background:var(--panel);border:1px solid'
-    + ' var(--rule);border-radius:6px;padding:9px;margin:6px 0 0"></pre>'
     + (dk.docker_available
-        ? note('Build compiles the image from <code>docker/Dockerfile</code>; '
-          + 'Start brings the compose project up in the background; Stop tears '
-          + 'it down. These shell out to the Docker CLI on this host.', "info")
+        ? note('<b>Build</b> compiles the images. <b>Smoke-test</b> runs the '
+          + 'compose mock inside the container and streams it here \\u2014 it '
+          + 'verifies image, volumes, user and dataset before any key is spent. '
+          + 'Runs from the Launch tab actually enter the container when you tick '
+          + '<b>run inside the sandbox container</b> there; localhost providers '
+          + 'stay on the host, because the container has no route to your '
+          + 'machine. <b>Stop</b> tears the project down.', "info")
         : note('<b>Docker is not installed or not reachable.</b> The container '
           + 'path in <code>docker/sandbox.md</code> cannot be executed here. The '
           + 'benchmark still runs on the host; this is OS-level assurance only.',
           "warn"));
+}}
+
+async function fillDocker(v) {{
+  // Live state, refetchable by the Refresh button and re-run after every
+  // action. The output <pre> lives OUTSIDE #dk-body (see the System view), so
+  // refreshing the status never wipes the last action's output.
+  const el = $("#dk-body", v);
+  if (!el || !v.isConnected) return;
+  try {{
+    const dk = await apiWithRetry("/api/docker");
+    if (!v.isConnected || !$("#dk-body", v)) return;
+    $("#dk-body", v).innerHTML = dockerPanelBody(dk);
+  }} catch (e) {{
+    const el2 = $("#dk-body", v);
+    if (el2 && v.isConnected)
+      el2.innerHTML = '<div class="note err">Could not read docker state: '
+        + esc(e.message) + '</div>';
+  }}
 }}
 
 // ---- lightbox -------------------------------------------------------------

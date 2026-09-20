@@ -166,11 +166,21 @@ def save_provider(payload):
 
 
 def delete_provider(name):
-    """Hide a provider. Returns (ok, message, was_shipped).
+    """Hide a provider AND its models. Returns (ok, message, was_shipped, n_models).
 
     A shipped provider gets a tombstone rather than being erased, so the removal
     is visible in the overlay and can be undone by editing one file. A provider
     that only ever existed in the overlay is dropped outright.
+
+    Deleting a provider also deletes its models, in the SAME overlay write: a
+    provider that no longer exists cannot serve anything, and leaving its models
+    in the table means the Launch form offers a model with no endpoint and
+    `/api/registry` keeps listing it -- the user reads that as "delete did not
+    work", which is a fair reading of a UI where one delete leaves the other
+    half of the thing on screen. Only models whose `provider` field is exactly
+    this name are removed (a model moved to another provider is that provider's
+    business). One write, not two, so a crash can never leave providers gone
+    and models visible.
 
     Idempotent, like `delete_model`: hiding something already hidden is the
     state the caller asked for, not an error.
@@ -179,18 +189,29 @@ def delete_provider(name):
     overlay = DSC.load_overlay()
     if name not in providers:
         if name in (overlay.get("removed_providers") or []):
-            return True, "already hidden", True
-        return False, f"no provider called {name!r}", False
+            return True, "already hidden", True, 0
+        return False, f"no provider called {name!r}", False, 0
     shipped = bool(CAT._read_registry_file().get("providers", {}).get(name))
+    shipped_models = CAT._read_registry_file().get("models") or {}
+    models = DSC.merged_models()
+    mine = [mid for mid, m in models.items()
+            if (m.get("provider") or "") == name]
 
     def _apply(ov):
         ov["providers"].pop(name, None)
         if shipped and name not in ov["removed_providers"]:
             ov["removed_providers"].append(name)
+        for mid in mine:
+            ov["models"].pop(mid, None)
+            if mid in shipped_models and mid not in ov["removed_models"]:
+                ov["removed_models"].append(mid)
     DSC.mutate_overlay(_apply)
     CAT.DISCOVERY.pop(name, None)
-    return True, ("hidden; the shipped entry is untouched in the repository"
-                  if shipped else "removed"), shipped
+    msg = ("hidden; the shipped entry is untouched in the repository"
+           if shipped else "removed")
+    if mine:
+        msg += f"; {len(mine)} model(s) hidden with it"
+    return True, msg, shipped, len(mine)
 
 
 def reset_provider(name):

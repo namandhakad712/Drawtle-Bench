@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.8.1 — the dashboard really connects to Docker
+
+Three things the user found while using it, all real.
+
+- **Deleting a provider now deletes its models too.** It used to hide only the
+  provider; the models stayed in the table, so the delete read as "did not
+  work" and the Launch form could still offer a model with no endpoint. One
+  overlay write, same as the batch delete: provider + its models (matched on
+  the `provider` field only) are removed together, shipped entries tombstoned
+  so the removal stays visible and undoable.
+- **"Run inside the sandbox container" actually runs inside it.** The checkbox
+  was cosmetic before this release: `start()` always spawned `bench.py run` on
+  the host, and `docker compose up -d` only ever ran the compose file's own
+  one-shot mock. The Supervisor now builds (`build_cmd`, testable without
+  spawning) a `docker compose run --rm -T bench run ...` command when the box
+  is ticked: paths rewritten to the container's `/bench/results` mount so the
+  artifacts land in the same results directory the dashboard reads, localhost
+  providers refused before any key is spent (the container cannot reach your
+  machine), and a missing daemon refused with the reason.
+- **The Docker panel is live.** It fetched state once and locked into
+  "disabled" if the daemon was down at render time. Now: a **refresh status**
+  control that re-probes without reloading, the status re-fetches after every
+  action, and the action set is **Build images / Smoke-test container / Stop**
+  -- the smoke test runs the compose mock in the foreground and streams it, so
+  "does the container actually work?" is answerable from the panel.
+
+Also: `test_hosted_and_accounting` now runs against a throwaway overlay and
+settings instead of the operator's real one. A user who hides models on the
+dashboard was turning its "priced model" checks red, and the failure read as a
+code bug when it was the suite reading someone's edits.
+
 ## v2.8.0 — finishing the dashboard (M3–M6)
 
 ### M4 — API keys in the UI

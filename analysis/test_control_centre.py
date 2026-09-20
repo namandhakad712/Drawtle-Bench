@@ -27,6 +27,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -364,7 +365,15 @@ def main():
         check("GET /api/docker reports isolation level",
               "level" in dk and dk["level"] in ("none", "docker",
               "docker-requested-unavailable"), str(dk))
-        st, dkr = req("/api/docker", "POST", {"action": "build"})
+        # The suite must not depend on whether THIS machine has a daemon: with
+        # one running, an un-mocked "build" would start a real image build and
+        # the test would time out waiting for it. Force the daemon "down" for
+        # the duration of the call (same process, so the patch reaches the
+        # handler) -- the graceful-degradation path is what is under test, and
+        # it must behave identically with or without a daemon.
+        with mock.patch("drawtle.sandbox.docker_available",
+                        return_value=(False, "test-daemon-down")):
+            st, dkr = req("/api/docker", "POST", {"action": "build"})
         check("POST /api/docker build degrades gracefully without docker",
               st in (200, 502) and dkr.get("ok") is False, str((st, dkr)))
         st, bad = req("/api/docker", "POST", {"action": "rm -rf /"})
@@ -417,6 +426,58 @@ def main():
                 if os.path.exists(p):
                     os.remove(p)
 
+        # ---- sandbox run wiring: the command the Supervisor builds ---------
+        # The dashboard now offers "run inside the sandbox container". The argv
+        # it would spawn must be checkable WITHOUT spawning (no docker, no
+        # child python): build_cmd returns the command and never starts it.
+        # Pin the path rewrite (host results -> /bench/results) and the
+        # rejections that must happen before a key is spent.
+        from web import supervisor as SUP
+        sup2 = SUP.Supervisor(results_dir=results_dir, logs_dir=logs_dir)
+        base = dict(backend="internlm", model="internvl-latest",
+                    dataset=os.path.join("anywhere", "dataset.json"),
+                    mode="optimal", lag=1, frames=True, navigate=False)
+        with mock.patch("drawtle.sandbox.docker_available",
+                        return_value=(True, "test")):
+            cmd = sup2.build_cmd({**base, "sandbox": True})
+        check("sandbox cmd runs through docker compose",
+              cmd and os.path.basename(cmd[0]).lower().startswith("docker"),
+              str(cmd[:2]))
+        check("sandbox cmd uses the compose bench service",
+              "run" in cmd and "--rm" in cmd and "bench" in cmd, str(cmd))
+        check("sandbox cmd rewrites paths into the mounted volume",
+              "--dataset" in cmd and "/bench/results/dataset.json" in cmd
+              and "--out-dir" in cmd and "/bench/results" in cmd)
+        check("sandbox cmd keeps the runner flags",
+              "--frames" in cmd and "/bench/results/frames" in cmd
+              and "--mode" in cmd and "optimal" in cmd and "--lag" in cmd)
+        # A localhost provider cannot run inside the container (no route to
+        # your machine) -- it must be refused before any key is spent.
+        with mock.patch("drawtle.sandbox.docker_available",
+                        return_value=(True, "test")), \
+             mock.patch("web.guard.backend_exists", return_value=True), \
+             mock.patch("drawtle.discovery.merged_providers",
+                        return_value={"localtest": {"url": "http://127.0.0.1:"
+                                                     "8000/v1/chat/completions"}}):
+            try:
+                sup2.build_cmd({**base, "backend": "localtest", "sandbox": True})
+                refused = False
+            except ValueError:
+                refused = True
+        check("sandbox refuses a localhost provider",
+              refused, "a localhost provider was accepted into a container "
+              "that cannot reach localhost")
+        # Docker unavailable -> refuse with the reason, not a spawned shell.
+        with mock.patch("drawtle.sandbox.docker_available",
+                        return_value=(False, "daemon down")):
+            try:
+                sup2.build_cmd({**base, "sandbox": True})
+                refused2 = False
+            except ValueError as e:
+                refused2 = "daemon down" in str(e)
+        check("sandbox refuses when docker is down",
+              refused2, "sandbox run accepted with no daemon")
+
         # ---- preflight --------------------------------------------------
         st, pf = req("/api/preflight?backend=intern&model=intern-s1")
         check("GET /api/preflight", st == 200, str(st))
@@ -455,11 +516,35 @@ def main():
         check("POST /api/provider rejects a bad name/url/key",
               st == 400 and r2.get("error"), str(r2))
 
+        # A provider's models must die with it: deleting a provider from the
+        # dashboard while its models stay in the Models tab reads as "delete
+        # did not work", and the models could no longer be run anyway (their
+        # provider no longer exists). The cascade must be one overlay write.
+        st, mc = req("/api/model", "POST", {
+            "id": "test-provider-model", "provider": "test-provider",
+            "context_window": None, "max_output": None,
+            "price_in": None, "price_out": None,
+            "capabilities": ["image_in"], "source": "cascade-test"})
+        check("POST /api/model adds one under the test provider",
+              st == 200 and mc.get("ok"), str(mc))
+
         st, r3 = req("/api/provider/delete", "POST", {"name": "test-provider"})
         check("POST /api/provider/delete removes it", st == 200 and r3.get("ok"))
+        check("delete reports the models it hid",
+              r3.get("n_models_hidden") == 1, str(r3))
         st, reg3 = req("/api/registry")
         check("the provider is gone",
               not any(p["name"] == "test-provider" for p in reg3["providers"]))
+        check("the provider's model is gone with it",
+              not any(m["id"] == "test-provider-model" for m in reg3["models"]))
+        # Both were overlay-only entries, so they are dropped from the overlay
+        # edits outright (no tombstone needed -- there is no shipped entry to
+        # resurrect). The edit must contain neither.
+        st, ov3 = req("/api/overlay")
+        check("the cascade removed both from the overlay",
+              "test-provider" not in (ov3.get("providers") or {})
+              and "test-provider-model" not in (ov3.get("models") or {}),
+              str(ov3))
         check("the shipped registry file was not written to",
               "test-provider" not in (S.CAT._read_registry_file()
                                       .get("providers") or {}))

@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -53,6 +54,10 @@ import time
 import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: Where the sandbox container sees the mounted results directory
+#: (docker/docker-compose.yml mounts ../results -> /bench/results).
+_CONTAINER_RESULTS = "/bench/results"
 
 #: How many lines of a child's output to keep. Enough for a status line and a
 #: stack trace; not enough to hold a whole run's stdout.
@@ -181,14 +186,27 @@ class Supervisor:
 
     # -- starting --------------------------------------------------------
 
-    def start(self, spec):
-        """Spawn a run. Returns the Job. Raises ValueError on a bad spec.
+    def build_cmd(self, spec):
+        """Validate a spec and return the argv, WITHOUT spawning a process.
+
+        `start` calls this and then spawns; the tests call it directly, so a
+        command string can be checked without a child process and without a
+        run, results file or log. The validation is identical either way --
+        a preview is as strict as a launch, because a command that would fail
+        at spawn time should not be previewable as if it would work.
 
         The argv is assembled here from explicit fields rather than from a
         client-supplied string, because a shell string from a browser is a
         remote-code-execution request with extra steps. Only the fields below
         can reach the command line, each is type-checked, and the process is
         never started through a shell.
+
+        With `spec["sandbox"]` the run is executed inside the sandbox
+        container instead of on the host: the command becomes
+        `docker compose run` against docker/docker-compose.yml, and the
+        dataset / results paths are rewritten to the container's mount points
+        (`/bench/results/...`), so the artifacts the container writes land in
+        the same results directory every other reader reads.
         """
         backend = str(spec.get("backend") or "").strip()
         model = str(spec.get("model") or "").strip()
@@ -232,33 +250,73 @@ class Supervisor:
             raise ValueError("a run id may contain letters, digits, dot, dash "
                              "and underscore only")
 
-        # The job runs under SOMEWHERE's Python. `sys.executable` is the
-        # right default (the interpreter serving this page), but it may be a
-        # bare system install without the rasteriser or SDK extras that the
-        # bench environment has. `DRAWTLE_PYTHON` lets the operator point the
-        # control centre at the environment actually built for running the
-        # bench (e.g. a venv with playwright/cairosvg), so a run spawned from
-        # the UI never fails at turn 0 for "no rasteriser".
-        interpreter = os.environ.get("DRAWTLE_PYTHON") or sys.executable
-        cmd = [interpreter, os.path.join(ROOT, "bench.py"), "run",
-               "--backend", backend, "--model", model,
-               "--dataset", dataset,
-               "--out-dir", self.results_dir,
-               "--mode", mode, "--lag", str(lag),
-               "--run-mode", run_mode]
+        effort = spec.get("effort")
+        if effort and effort not in ("minimal", "low", "medium", "high"):
+            raise ValueError("effort must be minimal, low, medium or high")
+
+        if spec.get("sandbox"):
+            from drawtle import discovery as DSC
+            from drawtle import sandbox as SBX
+            ok, detail = SBX.docker_available()
+            if not ok:
+                raise ValueError(
+                    f"the sandbox container cannot be used: {detail}")
+            prov = (DSC.merged_providers() or {}).get(backend) or {}
+            url = str(prov.get("url") or "")
+            if any(host in url for host in
+                   ("localhost", "127.0.0.1", "0.0.0.0", "[::1]")):
+                raise ValueError(
+                    f"{backend} is a localhost/self-hosted provider. The sandbox "
+                    f"container has no route to your machine (see "
+                    f"docker/sandbox.md), so it cannot reach it -- run this "
+                    f"provider on the host instead.")
+            docker = shutil.which("docker") or "docker"
+            cmd = [docker, "compose", "-f",
+                   os.path.join(ROOT, "docker", "docker-compose.yml"),
+                   "run", "--rm", "-T", "bench", "run",
+                   "--backend", backend, "--model", model,
+                   "--dataset", _CONTAINER_RESULTS + "/" + os.path.basename(dataset),
+                   "--out-dir", _CONTAINER_RESULTS,
+                   "--mode", mode, "--lag", str(lag),
+                   "--run-mode", run_mode]
+        else:
+            # The job runs under SOMEWHERE's Python. `sys.executable` is the
+            # right default (the interpreter serving this page), but it may be
+            # a bare system install without the rasteriser or SDK extras that
+            # the bench environment has. `DRAWTLE_PYTHON` lets the operator
+            # point the control centre at the environment actually built for
+            # running the bench (e.g. a venv with playwright/cairosvg), so a
+            # run spawned from the UI never fails at turn 0 for "no
+            # rasteriser".
+            interpreter = os.environ.get("DRAWTLE_PYTHON") or sys.executable
+            cmd = [interpreter, os.path.join(ROOT, "bench.py"), "run",
+                   "--backend", backend, "--model", model,
+                   "--dataset", dataset,
+                   "--out-dir", self.results_dir,
+                   "--mode", mode, "--lag", str(lag),
+                   "--run-mode", run_mode]
+
         if limit:
             cmd += ["--limit", str(limit)]
         if run_id:
             cmd += ["--run-id", run_id]
-        effort = spec.get("effort")
         if effort:
-            if effort not in ("minimal", "low", "medium", "high"):
-                raise ValueError("effort must be minimal, low, medium or high")
             cmd += ["--effort", effort]
         if spec.get("frames"):
-            cmd += ["--frames", os.path.join(self.results_dir, "frames")]
+            if spec.get("sandbox"):
+                cmd += ["--frames", _CONTAINER_RESULTS + "/frames"]
+            else:
+                cmd += ["--frames", os.path.join(self.results_dir, "frames")]
         if spec.get("navigate"):
             cmd += ["--navigate"]
+        return cmd
+
+    def start(self, spec):
+        """Spawn a run. Returns the Job. Raises ValueError on a bad spec."""
+        cmd = self.build_cmd(spec)
+        backend = str(spec.get("backend") or "").strip()
+        model = str(spec.get("model") or "").strip()
+        run_id = str(spec.get("run_id") or "").strip() or None
 
         job_id = uuid.uuid4().hex[:12]
         job = Job(job_id, cmd, run_id or "(auto)", backend, model,
