@@ -110,7 +110,7 @@ The survey also confirmed several strengths:
 | Method | Findings |
 |---|---|
 | **Reproduction by tower** | C1, C2 (verified by running the user's scenario and observing `RemoteDisconnected`); H3 (reproduced with `python bench.py report --run run-agnes-3.0-flash-1789922909` → `run not found`). |
-| **Read-only inspection at HEAD (v2.8.4)** | All other findings (H1, H2, H4, M1–M13, L1–L8). |
+| **Read-only inspection at HEAD (v2.8.4)** | All other findings (H1, H2, H4, M1–M12, L1–L8). |
 | **Historical note** | C1 and C2 describe bugs that caused the user's failed run. Both are patched in v2.8.4, but they are retained because the mission explicitly requires them and they explain the user's actual pain. |
 
 ---
