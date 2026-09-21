@@ -4,14 +4,20 @@ A backend is the ONLY channel between the bench and a language model. The model
 never gets filesystem, shell, or network access -- it receives messages and
 returns text. That is the isolation contract: the "sandbox" is the protocol.
 
-Backends are stdlib-only (urllib) so the bench runs without installing SDKs.
+Transport: every provider that speaks the OpenAI chat-completions wire format is
+driven by the `openai` SDK when it is installed (pooled connections, honest
+`usage` objects including cached/reasoning token breakdowns). The stdlib urllib
+path remains as the zero-dependency fallback and is byte-equivalent in body
+shape, so a fresh checkout runs before `pip install -r requirements.txt`.
+Anthropic keeps its own protocol via urllib (it is not OpenAI-compatible).
 Real calls need an API key in the environment; everything else degrades to a
 clear error.
 
 Best-practice features wired in here:
   - exponential-backoff retries with honouring Retry-After (429/5xx)
-  - per-request timeout
+  - per-request timeout under a hard wall-clock deadline
   - token + cost tracking (from a price table; overridden by API usage when given)
+  - reasoning split from the answer (`reasoning` field, never parsed)
   - a MockBackend so the whole pipeline is testable with no network/key
 """
 import json
@@ -45,6 +51,17 @@ class ModelResponse:
     #: Never set this to "measured" for a number we computed ourselves.
     token_source: str = "measured"
     raw: dict = field(default_factory=dict)
+    #: The model's reasoning/thinking, SEPARATE from `text` when the provider
+    #: returns it in its own field (`reasoning_content`, `reasoning`, or an
+    #: Anthropic thinking block). When a provider inlines thinking into
+    #: `content` (InternLM with thinking_mode on), the wrapper cannot split it
+    #: here -- the backend asks for thinking off and the parser tolerates
+    #: leftovers. Never a source of the answer: `text` is what gets parsed.
+    reasoning: str = ""
+    #: `usage.prompt_tokens_details.cached_tokens` when reported (0 if not).
+    cached_tokens: int = 0
+    #: `usage.completion_tokens_details.reasoning_tokens` when reported (0 if not).
+    reasoning_tokens: int = 0
 
 
 #: Sentinel for "the provider gave us no usage block". Kept distinct from 0 so a
@@ -57,6 +74,41 @@ NO_USAGE = object()
 # for cost caps; replace with tiktoken if installed for accuracy.
 def _est_tokens(text):
     return max(1, len(text) // 4)
+
+
+def _normalize_sdk_error(exc, url):
+    """Map an OpenAI-SDK exception onto the urllib-shaped errors the retry loop
+    already knows how to handle.
+
+    `complete` decides transience from `urllib.error.HTTPError` (status codes)
+    and `URLError`/`TimeoutError`/`ConnectionError` (transport). The SDK raises
+    its own hierarchy (`APIStatusError` with `.status_code`, `APIConnectionError`,
+    `APITimeoutError`), so without this mapping a 429 or a dropped connection
+    from the SDK path would skip the retry logic entirely. HTTP status errors
+    carry `Retry-After` on `.headers` when present; preserve it so the 429
+    backoff honours the provider.
+    """
+    code = getattr(exc, "status_code", None)
+    if isinstance(code, int):
+        hdrs = {}
+        h = getattr(exc, "headers", None)
+        if h is not None:
+            try:
+                ra = h.get("retry-after") or h.get("Retry-After")
+            except Exception:                     # noqa: BLE001
+                ra = None
+            if ra:
+                hdrs["Retry-After"] = ra
+        return urllib.error.HTTPError(url, code, str(exc), hdrs, None)
+    name = type(exc).__name__
+    if name in ("APITimeoutError", "APIConnectionError", "ConnectTimeout"):
+        return TimeoutError(f"{name}: {exc}")
+    if name in ("ConnectionError", "RemoteProtocolError", "ReadTimeout"):
+        return ConnectionError(f"{name}: {exc}")
+    if name in ("APIError", "InternalServerError", "RateLimitError",
+                "APIConnectionError"):
+        return urllib.error.URLError(f"{name}: {exc}")
+    return exc
 
 
 def _resolve_usage(usage, prompt_text, completion_text,
@@ -96,6 +148,39 @@ def _resolve_usage(usage, prompt_text, completion_text,
     if pout is None:
         pout = _est_tokens(completion_text)
     return pin, pout, "estimated"
+
+
+def _usage_details(usage):
+    """(cached_input_tokens, reasoning_output_tokens) from a usage dict.
+
+    Both are zero when absent. `cached_tokens` is part of the input count
+    (never added on top of prompt_tokens), and `reasoning_tokens` is part of
+    the output count -- these are *breakdowns*, reported so a reader can see
+    how much of a turn went to thinking rather than to the answer.
+
+    Shape-tolerant: OpenAI spells the breakdown `prompt_tokens_details.
+    cached_tokens` / `completion_tokens_details.reasoning_tokens`; Anthropic
+    spells it `cache_read_input_tokens` / `cache_creation_input_tokens` and
+    `output_tokens_details.reasoning_tokens`; a proxy may spell it `cached`
+    at the top level. Read all of them, take the first present.
+    """
+    u = usage or {}
+    cached = None
+    for cand in (u.get("cache_read_input_tokens"),
+                 u.get("cache_creation_input_tokens"),
+                 u.get("cached_tokens"), u.get("cached"),
+                 (u.get("prompt_tokens_details") or {}).get("cached_tokens")):
+        if isinstance(cand, int) and cand >= 0:
+            cached = cand
+            break
+    reasoning = None
+    for cand in ((u.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+                 (u.get("output_tokens_details") or {}).get("reasoning_tokens"),
+                 u.get("reasoning_tokens")):
+        if isinstance(cand, int) and cand >= 0:
+            reasoning = cand
+            break
+    return cached or 0, reasoning or 0
 
 
 # Default price per 1K tokens (USD). Override per model in the run config.
@@ -297,6 +382,87 @@ class ModelBackend:
         self.cost_known = True
         return (pin / 1000.0) * self.price["in"] + (pout / 1000.0) * self.price["out"]
 
+    # ------------------------------------------------------ SDK transport ---
+    #
+    # One transport for every provider that speaks the OpenAI chat-completions
+    # wire format, chosen at request time:
+    #   - `openai` SDK when it is installed (the recommended transport: pooled
+    #     connections, SDK-level retry fields, honest usage objects including
+    #     cached/reasoning breakdowns). It honours HTTP_PROXY/HTTPS_PROXY, so
+    #     the egress-proxy sandbox keeps working unchanged.
+    #   - stdlib urllib when it is not (zero-dependency fallback, so the bench
+    #     still runs on a fresh checkout and in tests).
+    # The hand-written retry/deadline wrapper stays the ONLY policy for both
+    # paths -- the SDK's own retries are disabled (max_retries=0) so a 429 is
+    # handled exactly once, with the same backoff, whether it came from the
+    # SDK path or the urllib path.
+
+    def _sdk_client(self, url):
+        """An OpenAI-compatible client for `url`, cached per URL. None if no SDK."""
+        cache = getattr(self, "_sdk_clients", None)
+        if cache is None:
+            cache = {}
+            self._sdk_clients = cache
+        if url in cache:
+            return cache[url]
+        try:
+            from openai import OpenAI
+        except ImportError:
+            if not getattr(self, "_sdk_warned", False):
+                self._sdk_warned = True
+                sys.stderr.write(
+                    f"note: openai SDK not installed; using the stdlib "
+                    f"transport for {self.name} (pip install -r "
+                    f"requirements.txt for the supported path)\n")
+            return None
+        client = OpenAI(base_url=url, api_key=self.api_key or "none",
+                        timeout=self.timeout_s, max_retries=0)
+        cache[url] = client
+        return client
+
+    def _openai_compat_post(self, url, messages, temperature, max_tokens,
+                            body_extra=None):
+        """POST an OpenAI-shaped request. Returns the parsed payload dict.
+
+        `body_extra` carries the provider-specific knobs (reasoning effort,
+        thinking_mode, response_format) that live in providers.json. The SDK
+        path sends the standard fields as first-class arguments and everything
+        else as `extra_body`, because the SDK rejects unknown keyword
+        arguments; the urllib path merges them into the body directly.
+        """
+        body = {"model": self.model, "messages": messages,
+                "temperature": temperature, "max_tokens": max_tokens}
+        if body_extra:
+            body.update(body_extra)
+        self._last_prompt_text = "\n".join(
+            str(m.get("content", "")) for m in messages)
+
+        client = self._sdk_client(url)
+        if client is not None:
+            # Standard fields as first-class arguments; provider knobs via
+            # `extra_body` (the SDK rejects unknown keyword arguments like
+            # thinking_mode, but passes them through inside extra_body).
+            client_kw = {"model": self.model, "messages": messages,
+                         "temperature": temperature, "max_tokens": max_tokens}
+            extra = {k: v for k, v in body.items() if k not in client_kw}
+            if extra:
+                client_kw["extra_body"] = extra
+            try:
+                resp = client.chat.completions.create(**client_kw)
+                # SDK objects are pydantic; `model_dump()` gives the plain
+                # dict shape `_wrap` expects (choices/usage/...).
+                return resp.model_dump()
+            except BaseException as exc:          # noqa: BLE001 - normalise
+                raise _normalize_sdk_error(exc, url) from exc
+
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                     headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
+            return json.loads(r.read().decode())
+
 
 class MockBackend(ModelBackend):
     """Deterministic backend for pipeline tests. No network.
@@ -371,42 +537,46 @@ class OpenAIBackend(ModelBackend):
     def __init__(self, model="gpt-4o", api_key=None, **kw):
         super().__init__(model, api_key=api_key, **kw)
 
+    def _spec_params(self):
+        """Registry request knobs for THIS backend name, or {}.
+
+        `request_params` and `json_mode` belong to providers.json so a
+        provider stays declarative; the hand-written OpenAI/Gemini classes read
+        them too (via `spec = provider_spec(self.name)`) rather than each
+        subclass restating them.
+        """
+        spec = provider_spec(self.name) if self.name != "base" else None
+        return (spec or {})
+
     def _post(self, messages, temperature=0.0, max_tokens=256, **kw):
-        body = {"model": self.model, "messages": messages,
-                "temperature": temperature, "max_tokens": max_tokens}
-        # Reasoning effort, only when this model is known to accept it. Sending
-        # the field to a model that does not know it is a 400 from some
-        # providers and silently ignored by others, so it is opt-in per model.
+        # Registry knobs ride in providers.json, not in this class: reasoning
+        # effort when known, plus `request_params`/`json_mode` from the spec.
+        extra = {}
         if self.effort and self.effort_field:
-            body[self.effort_field] = self.effort
+            extra[self.effort_field] = self.effort
+        spec = self._spec_params()
+        extra.update(spec.get("request_params") or {})
+        if spec.get("json_mode"):
+            extra["response_format"] = {"type": "json_object"}
         # The image is already in `messages`: the policy assembles the request
         # in OpenAI's multimodal shape, so the frame travels as part of the
         # conversation. There used to be an `image_b64` parameter here that
         # nothing ever passed -- a second, dead way to inject an image that a
         # reader would reasonably assume was doing something. Removed rather
         # than left as a trap.
-        # Keep the text we are about to send, so `_wrap` can estimate tokens
-        # against the REQUEST when the provider gives no usage block. Estimating
-        # from the response text (the old behaviour) reported the input count as
-        # a function of the output -- which is both wrong and, on this bench,
-        # wrong in the direction that understates cost.
-        self._last_prompt_text = "\n".join(
-            str(m.get("content", "")) for m in messages)
-        req = urllib.request.Request(
-            self.BASE, data=json.dumps(body).encode(),
-            headers={"Authorization": f"Bearer {self.api_key}",
-                      "Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
-            return json.loads(r.read().decode())
+        return self._openai_compat_post(
+            self.BASE, messages, temperature, max_tokens, extra)
 
     def _wrap(self, payload, lat):
         ch = payload["choices"][0]["message"]["content"] or ""
         # Prompt text for the estimator: the request body, not the response.
         prompt_text = getattr(self, "_last_prompt_text", "")
         pin, pout, src = _resolve_usage(payload.get("usage"), prompt_text, ch)
+        cached, rtoks = _usage_details(payload.get("usage"))
         return ModelResponse(text=ch, prompt_tokens=pin, completion_tokens=pout,
                              cost_usd=self._cost(pin, pout), latency_s=lat,
-                             token_source=src, raw=payload)
+                             token_source=src, raw=payload,
+                             cached_tokens=cached, reasoning_tokens=rtoks)
 
 
 class AnthropicBackend(ModelBackend):
@@ -448,14 +618,23 @@ class AnthropicBackend(ModelBackend):
             return json.loads(r.read().decode())
 
     def _wrap(self, payload, lat):
-        txt = "".join(b.get("text", "") for b in payload.get("content", []))
+        blocks = payload.get("content", []) or []
+        txt = "".join(b.get("text", "") for b in blocks if isinstance(b, dict))
+        # Anthropic returns extended thinking as content blocks of type
+        # "thinking" -- never merged into `text`, recorded separately.
+        reasoning = "".join(
+            b.get("thinking", "") for b in blocks
+            if isinstance(b, dict) and b.get("type") == "thinking")
         prompt_text = getattr(self, "_last_prompt_text", "")
         pin, pout, src = _resolve_usage(payload.get("usage"), prompt_text, txt,
                                         in_keys=("input_tokens", "prompt_tokens"),
                                         out_keys=("output_tokens", "completion_tokens"))
+        cached, rtoks = _usage_details(payload.get("usage"))
         return ModelResponse(text=txt, prompt_tokens=pin, completion_tokens=pout,
                              cost_usd=self._cost(pin, pout), latency_s=lat,
-                             token_source=src, raw=payload)
+                             token_source=src, raw=payload,
+                             reasoning=reasoning, cached_tokens=cached,
+                             reasoning_tokens=rtoks)
 
 
 class GeminiBackend(OpenAIBackend):
@@ -548,6 +727,10 @@ class GenericOpenAIBackend(ModelBackend):
         self.provider = provider
         self.spec = spec
         self.name = provider
+        # A provider-level deadline (providers.json `timeout_s`) beats the
+        # 60s default -- aggregators were observed stalling past it while
+        # still being alive. An explicit keyword from a caller still wins.
+        kw.setdefault("timeout_s", spec.get("timeout_s") or 60.0)
         # A URL containing `{model}` addresses the model in the path. Only
         # substituted when the placeholder is actually there, so a model name
         # with a slash (OpenRouter's `vendor/model`) is never silently rewritten.
@@ -578,13 +761,26 @@ class GenericOpenAIBackend(ModelBackend):
         if not self.url:
             raise SystemExit(
                 f"provider {self.name!r} has no endpoint in providers.json")
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        body = {"model": self.model, "messages": messages,
-                "temperature": temperature, "max_tokens": max_tokens}
+        extra = {}
+        # Reasoning effort, only when this model is known to accept it. Sending
+        # the field to a model that does not know it is a 400 from some
+        # providers and silently ignored by others, so it is opt-in per model.
         if self.effort and self.effort_field:
-            body[self.effort_field] = self.effort
+            extra[self.effort_field] = self.effort
+        # Provider-level request knobs from providers.json (`request_params`).
+        # InternLM's s2/s1 families default `thinking_mode` ON, which makes the
+        # model reason aloud inside `content` and eat the request's output
+        # budget before the JSON -- that is the run killer this bench hit.
+        # Declaring the flag lets the registry turn it OFF for providers that
+        # accept it, per family, without a class per provider.
+        extra.update(self.spec.get("request_params") or {})
+        # Forced JSON output: providers that implement the OpenAI
+        # `response_format` (and that have been verified to, hence the
+        # explicit `json_mode: true` in the spec) get it. Not sent otherwise:
+        # an unverified provider that rejects the field answers 400, which is
+        # a worse failure than a markdown-wrapped reply the parser can strip.
+        if self.spec.get("json_mode"):
+            extra["response_format"] = {"type": "json_object"}
         # Messages are passed through unchanged, including multimodal ones. The
         # policy is what assembles a frame into the request, so a message that
         # already carries a list of parts must be sent as-is -- wrapping a list
@@ -592,13 +788,8 @@ class GenericOpenAIBackend(ModelBackend):
         # reject it. There is no `image_b64` parameter here for the reason given
         # on the OpenAI-compatible `_post`: it was a second, dead way to inject
         # an image.
-        self._last_prompt_text = "\n".join(
-            str(m.get("content", "")) for m in messages)
-        req = urllib.request.Request(
-            self.url, data=json.dumps(body).encode(),
-            headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
-            return json.loads(r.read().decode())
+        return self._openai_compat_post(
+            self.url, messages, temperature, max_tokens, extra)
 
     def _wrap(self, payload, lat):
         # Some providers return a `choices` array that is empty or lacks
@@ -610,16 +801,30 @@ class GenericOpenAIBackend(ModelBackend):
             raise RuntimeError(
                 f"{self.name} returned no choices "
                 f"({json.dumps(err)[:300]})")
-        ch = (choices[0].get("message") or {}).get("content") or ""
+        msg = choices[0].get("message") or {}
+        ch = msg.get("content") or ""
         if isinstance(ch, list):        # some compat layers return content blocks
             ch = "".join(b.get("text", "") for b in ch if isinstance(b, dict))
+        # Reasoning is read from its OWN field whenever the provider has one
+        # (`reasoning_content` = DeepSeek/Qwen/InternLM previews via gateways,
+        # `reasoning` = OpenRouter). It is recorded separately and NEVER parsed
+        # as the answer. When a provider inlines thinking into `content`, the
+        # spec's `request_params` (e.g. thinking_mode: false) is what stops it.
+        reasoning = msg.get("reasoning_content") or msg.get("reasoning") or ""
+        if isinstance(reasoning, list):
+            reasoning = "".join(
+                b.get("text", "") or b.get("reasoning", "")
+                for b in reasoning if isinstance(b, dict))
         in_keys, out_keys = self._usage_keys()
         prompt_text = getattr(self, "_last_prompt_text", "")
         pin, pout, src = _resolve_usage(payload.get("usage"), prompt_text, ch,
                                         in_keys=in_keys, out_keys=out_keys)
+        cached, rtoks = _usage_details(payload.get("usage"))
         return ModelResponse(text=ch, prompt_tokens=pin, completion_tokens=pout,
                              cost_usd=self._cost(pin, pout), latency_s=lat,
-                             token_source=src, raw=payload)
+                             token_source=src, raw=payload,
+                             reasoning=str(reasoning), cached_tokens=cached,
+                             reasoning_tokens=rtoks)
 
     def _usage_keys(self):
         """Which `usage` keys carry the counts for this provider.

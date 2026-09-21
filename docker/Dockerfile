@@ -26,6 +26,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends libcairo2 \
 USER bench
 ENV PATH="/home/bench/.local/bin:${PATH}"
 RUN pip install --no-cache-dir --user cairosvg 2>/dev/null || true
+# Model-provider transport: the OpenAI SDK drives every OpenAI-compatible
+# backend (pooled connections, honest usage objects incl. cached/reasoning
+# token breakdowns). It honours HTTP_PROXY/HTTPS_PROXY, so the egress-proxy
+# allow-list keeps working unchanged. Failure is tolerated on purpose: with it
+# missing the bench still runs on the stdlib urllib transport, and `doctor`
+# reports which transport is active.
+RUN pip install --no-cache-dir --user "openai>=1.40,<2" 2>/dev/null || true
 USER root
 
 # Everything bench.py imports at module scope. `web/` is required: bench.py

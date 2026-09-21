@@ -2312,7 +2312,7 @@ RENDER.live = async function (v) {{
     + '<button class="btn" id="lv-clear">Clear</button>'
     + '<span style="flex:1"></span>'
     + '<span class="tiny faint" id="lv-meta"></span></div>'
-    + '<div id="lv-stage" class="lv-stage"><div class="empty">'
+    + '<div id="lv-stage" class="lv-stage"><div id="lv-boot" class="empty">'
     + '<span class="spin"></span> connecting</div></div>';
   v.innerHTML = html;
 
@@ -2400,6 +2400,8 @@ RENDER.live = async function (v) {{
         return;
       }}
       if (r.turns && r.turns.length) {{
+        const boot = stage.querySelector("#lv-boot");
+        if (boot) boot.remove();
         stage.insertAdjacentHTML("beforeend", r.turns.map(card).join(""));
         LV.offset = r.offset;
         if (LV.follow || initial) stage.scrollTop = stage.scrollHeight;
@@ -2450,7 +2452,7 @@ RENDER.live = async function (v) {{
   if (runEl) runEl.addEventListener("change", e => {{
     LV.run = e.target.value; LV.offset = 0; LV.done = false;
     window.__lvRun = LV.run;
-    stage.innerHTML = '<div class="empty"><span class="spin"></span> loading</div>';
+    stage.innerHTML = '<div id="lv-boot" class="empty"><span class="spin"></span> loading</div>';
     tick(true);
   }});
   const fEl = $("#lv-follow");

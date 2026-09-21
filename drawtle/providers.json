@@ -77,6 +77,7 @@
       "auth": "bearer",
       "openai_compat": true,
       "usage_fields": [["prompt_tokens", "input_tokens"], ["completion_tokens", "output_tokens"]],
+      "json_mode": true,
       "context_note": "Reference implementation of the wire format.",
       "self_hosted": false,
       "rate_limit": null
@@ -120,6 +121,7 @@
       "auth": "bearer",
       "openai_compat": true,
       "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "request_params": {"thinking_mode": false},
       "capabilities": ["image_in", "video_in", "thinking", "tool_use"],
       "context_note": "Base https://chat.intern-ai.org.cn/api/v1/ -- note this is a DIFFERENT host from the console and docs site (internlm.intern-ai.org.cn), which is the mistake to make here. Auth is `Authorization: Bearer <token>`; the OpenAI SDK form takes the token WITHOUT the Bearer prefix. Published rate limit: 30 requests/min/user. 256K context on intern-s2, intern-s1-pro and intern-s2-preview-35b; 32K on intern-s1 and intern-s1-mini. Multimodal via content arrays: a real 80 KB frame was accepted by intern-s2, intern-s1 and internvl3.5-latest on 2026-09-19, and the vision models tokenise it (623 / 1870 / 1950 prompt tokens respectively for the same image, which is why prompt cost differs sharply between them for identical input). VERIFIED 2026-09-19: the endpoint DOES return a `usage` object with prompt/completion/total counts, so tokens are measured rather than estimated. The earlier note saying the reference does not document one, and advising readers to treat counts as estimated, was correct about the docs and wrong about the API. No pricing is published, so cost is still reported as unknown -- measured tokens with an unknown price, which is a different and more useful state than estimated tokens with an unknown price. `thinking_mode` (bool) is accepted by the s2/s1 families and defaults ON, which is why a reply opens with reasoning prose before the JSON; this registry does not expose the flag, so a run gets the default. Transient failures ('in prompt processing error', and a 400 on internvl3.5-latest) were observed and both cleared on retry with an identical payload -- treat them as retryable.",
       "self_hosted": false,
@@ -135,6 +137,7 @@
       "auth": "bearer",
       "openai_compat": true,
       "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "json_mode": true,
       "context_note": "Local server; no key required. Ollama's OpenAI-compatible route reports usage, so counts are measured. Context window is set by the Modelfile per model, not by the server -- check with `ollama show <model>`.",
       "self_hosted": true,
       "rate_limit": null
@@ -149,6 +152,7 @@
       "auth": "bearer",
       "openai_compat": true,
       "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "json_mode": true,
       "context_note": "Self-hosted OpenAI-compatible server. Started with --api-key it requires one; started without, it accepts any string. key_env is empty-by-default only if you run it keyless.",
       "self_hosted": true,
       "rate_limit": null
@@ -191,6 +195,7 @@
       "auth": "bearer",
       "openai_compat": true,
       "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "json_mode": true,
       "context_note": "OpenAI-compatible. Pricing and context windows are published on the provider's own docs page, not on the models endpoint.",
       "self_hosted": false,
       "rate_limit": null
@@ -233,6 +238,7 @@
       "auth": "bearer",
       "openai_compat": true,
       "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "request_params": {"thinking_mode": false},
       "capabilities": ["image_in", "video_in", "thinking", "tool_use"],
       "context_note": "Same host as `internlm`; the two entries exist because the harness this was imported from names this provider `intern` and its keys INTERN_API_KEY, while the docs use `internlm`. Both resolve to the same endpoint, so a model run under either name is the same model -- do not treat them as two providers in a comparison. VERIFIED against the live endpoint on 2026-09-19: the response DOES carry a `usage` object (`prompt_tokens`/`completion_tokens`/`total_tokens`), so token counts are measured, not estimated. An earlier note claimed no usage block was documented and told readers to assume estimates; a real call disproved that. Model list IS discoverable at /v1/models. The s2/s1 families reason before answering -- a reply opens with prose such as 'The user wants me to...' before any JSON -- which is the default-ON `thinking_mode` showing through and is why the parser must extract JSON rather than expect a bare object. Two transient failures were observed during verification ('in prompt processing error' and a 400 on internvl3.5-latest); both succeeded on retry with identical payloads, so treat either as retryable rather than as a configuration fault.",
       "self_hosted": false,
@@ -248,8 +254,9 @@
       "auth": "bearer",
       "openai_compat": true,
       "usage_fields": null,
+      "timeout_s": 300,
       "capabilities": ["image_in", "video_in", "audio_in", "thinking", "tool_use"],
-      "context_note": "Aggregator-style hub. Discovery returns image, video and text models side by side, so a model id alone does not say whether it accepts a rendered frame -- check `capabilities` on the model, not the provider. Publish no pricing or context windows on the models route.",
+      "context_note": "Aggregator-style hub. Discovery returns image, video and text models side by side, so a model id alone does not say whether it accepts a rendered frame -- check `capabilities` on the model, not the provider. Publish no pricing or context windows on the models route. VERIFIED 2026-09-21: this host stalled past the default 60s deadline on a cold first request (the bench's own config for it sets a 300s stream idle timeout), so `timeout_s` is 300 here.",
       "self_hosted": false,
       "rate_limit": null
     },
@@ -263,8 +270,9 @@
       "auth": "bearer",
       "openai_compat": true,
       "usage_fields": null,
+      "timeout_s": 180,
       "capabilities": ["image_in", "thinking", "tool_use"],
-      "context_note": "Router in front of many upstream vendors, addressed by bare model id (no `vendor/` prefix). Discovery returns the largest list of any provider here, so it is the cheapest way to widen a model sweep -- but an id behind a router can be repointed upstream, which is why every run log records the model string it was actually given rather than resolving it.",
+      "context_note": "Router in front of many upstream vendors, addressed by bare model id (no `vendor/` prefix). Discovery returns the largest list of any provider here, so it is the cheapest way to widen a model sweep -- but an id behind a router can be repointed upstream, which is why every run log records the model string it was actually given rather than resolving it. VERIFIED 2026-09-21: an HTTP 500 came back on a cold route, and the first request can be slow through the layers, so `timeout_s` is 180 here rather than the 60s default.",
       "self_hosted": false,
       "rate_limit": null
     },

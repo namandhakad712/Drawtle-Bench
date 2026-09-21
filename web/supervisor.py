@@ -412,6 +412,25 @@ class Supervisor:
                                     "as error")
                 except Exception as e:             # pragma: no cover - rare
                     job._append(f"[supervisor] could not record the exit: {e}")
+            # Artifact verification. A process that exits 0 MUST have left a
+            # terminal status and a summary; one that did is a result, one that
+            # did not is a ghost -- and real runs have been eaten by exactly
+            # that ghost (2026-09-21: run dirs left bare, status/summary gone).
+            # Warn loudly in the one place the operator reads, rather than
+            # letting a missing run read as "never happened".
+            if job.run_id != "(auto)" and job.returncode == 0:
+                try:
+                    from drawtle import runstate as RS
+                    st = RS.status_of(self.results_dir, job.run_id)
+                    if st.get("status") != RS.STATUS_SUCCESS:
+                        job._append(
+                            f"[supervisor] WARNING: process exited 0 but the run "
+                            f"status is {st.get('status')!r} "
+                            f"(expected 'success'). Artifacts may have been "
+                            f"removed after the run; check "
+                            f"{self.results_dir}/{job.run_id}/")
+                except Exception:                  # pragma: no cover - rare
+                    pass
         finally:
             if job._logfh is not None:
                 try:
