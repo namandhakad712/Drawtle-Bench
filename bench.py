@@ -60,7 +60,7 @@ from drawtle import runstate as RS
 from drawtle import transcript as TR
 from drawtle import sandbox as SBX
 from drawtle import cost as CO
-from web import server as SRV
+from drawtle import frames as FR
 
 DEFAULT_CONFIG = os.path.join(HERE, "configs", "default.json")
 BENCH_PROPS = os.path.join(HERE, "results", "bench_properties.json")
@@ -126,6 +126,23 @@ def cmd_run(a):
             f"  Add:  --frames results/frames\n"
             f"  (requires an SVG->PNG rasteriser: pip install cairosvg)\n"
             f"  Without it the model would receive text only, silently.")
+
+    # And a rasteriser that THIS interpreter can actually use. The packages are
+    # per interpreter: cairosvg/playwright can sit in one python and be absent
+    # from the one `bench.py` runs under, and the first frame would then blow
+    # up turn 1 -- after the warmup call was spent. Refuse before any call.
+    if a.backend != "mock":
+        _rs = FR.rasteriser_status()
+        if not _rs.get("usable", False):
+            raise SystemExit(
+                f"no usable SVG->PNG rasteriser in {sys.executable}:\n"
+                f"  cairosvg={_rs.get('cairosvg')}, "
+                f"playwright={_rs.get('playwright')}, "
+                f"chromium={'found' if _rs.get('chromium') else 'not found'}\n"
+                f"  A vision run cannot produce a single frame here.\n"
+                f"  Fix:  pip install cairosvg\n"
+                f"     or: pip install playwright && playwright install chromium\n"
+                f"  (check first: python analysis/preflight.py)")
 
     # State the resolved capability set before anything is spent. Half of these
     # numbers come from a local table and can be stale; saying so up front is
@@ -228,6 +245,31 @@ def cmd_run(a):
         print(f"\nrun failed: {type(exc).__name__}: {exc}")
         print(f"  {jsonl} holds the turns that completed; status is 'error'.")
         print(f"  resume with: --resume --run-id {runner.run_id}")
+        # A run that died mid-way still owns its JSONL. Aggregate a partial
+        # summary so `report` -- and any reader that opens the summary file --
+        # can see the turns that did land, instead of the CLI declaring the run
+        # `not found`. The status stays `error`, so the leaderboard still
+        # excludes it from rankings; this is readability, not a promotion.
+        try:
+            _done, _h = RS.load_done(a.out_dir, runner.run_id)
+            _eps = list(_done.values()) if _done else []
+            _meta = {
+                "run_id": runner.run_id,
+                "model": runner.backend.model,
+                "backend": runner.backend.name,
+                "n_episodes": len(_eps),
+                "episodes": _eps,
+                "n_turns": _count_lines(jsonl),
+                "partial": True,
+            }
+            _partial = ME.aggregate(jsonl, _meta,
+                                    ME.load_bench_properties(BENCH_PROPS))
+            ME.save_summary(_partial, paths["summary"])
+            print(f"partial: {paths['summary']} (status=error; readable via "
+                  f"`report`, excluded from rankings)")
+        except Exception as _agg:                         # never mask the run error
+            print(f"  note: could not aggregate partial data "
+                  f"({type(_agg).__name__}: {_agg})")
         raise
     bp = ME.load_bench_properties(BENCH_PROPS)
     summary = ME.aggregate(jsonl, meta, bp)
@@ -460,6 +502,10 @@ def _p(v):
 
 
 def cmd_serve(a):
+    # Imported lazily: the web stack is the one heavyweight dependency (views,
+    # supervisor, live feed) and every other subcommand -- generate, run,
+    # leaderboard -- has no business paying for it at module load.
+    from web import server as SRV
     SRV.serve(a.dir, a.host, a.port, open_browser=not a.no_open)
 
 

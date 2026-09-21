@@ -90,8 +90,11 @@ def aggregate(jsonl_path, meta=None, bench_properties=None):
 
 
 def save_summary(summary, path):
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(summary, fh, indent=2)
+    # Atomic: `open(path,"w")` truncates first, and a kill between the truncate
+    # and the dump leaves a zero-byte summary next to a status file that says
+    # `success` -- the status sidecar and the summary would disagree forever.
+    # atomic_write_json publishes via a unique temp + os.replace.
+    RS.atomic_write_json(path, summary)
     return path
 
 

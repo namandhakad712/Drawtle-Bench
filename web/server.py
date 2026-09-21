@@ -128,7 +128,7 @@ def list_runs(dir_, mode=None):
     mock run into a leaderboard.
     """
     rows = []
-    tracked = tracked_runs(dir_)
+    tracked = tracked_runs(dir_, refresh=True)
     for run_id, run in ST.enumerate_runs(dir_).items():
         s = run["summary"] or {}
         st = run["record"] or {}
@@ -340,9 +340,15 @@ def _datasets():
 _TRACKED_CACHE = None
 
 
-def tracked_runs(dir_=None):
+def tracked_runs(dir_=None, refresh=False):
     """The set of run ids under `dir_` whose files git tracks. Best effort."""
     global _TRACKED_CACHE
+    if refresh:
+        # A run committed while the server is up must stop being protected as
+        # if untracked on the next poll (and a run deleted from git must stop
+        # being protected at all). /api/runs is the one place that decides
+        # `tracked`, so it is the one place that refreshes.
+        _TRACKED_CACHE = None
     if _TRACKED_CACHE is not None:
         return _TRACKED_CACHE
     out = set()

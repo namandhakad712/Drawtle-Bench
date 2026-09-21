@@ -165,6 +165,15 @@ def page(version, state):
             side.append(f'<button class="snav" data-view="{k}"{cur}{mark}>'
                         f'{esc(v)}</button>')
     side = "".join(side)
+    # `json.dumps` does not escape < > & -- inside a <script> block a value
+    # carrying `</script>` or markup would break out of the string. Re-escape
+    # those as \uXXXX (valid inside a JS string literal) so the bootstrap JSON
+    # is always data, never code. Done here, in plain Python, so the f-string
+    # below never has to carry a backslash sequence.
+    boot_json = (json.dumps(state)
+                 .replace("&", "\\u0026")
+                 .replace("<", "\\u003c")
+                 .replace(">", "\\u003e"))
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -198,7 +207,7 @@ def page(version, state):
 <div id="toast-host"></div>
 
 <script>
-const BOOT = {json.dumps(state)};
+const BOOT = {boot_json};
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.prototype.slice.call((r || document).querySelectorAll(s));
 

@@ -199,6 +199,10 @@ class Supervisor:
         self._lock = threading.Lock()
 
     def list(self):
+        # The jobs list is the supervisor's heartbeat -- a dashboard polls it
+        # whenever the jobs view is visible. Reaping here is what makes the
+        # finished-job cleanup actually run (nothing else called `reap`).
+        self.reap()
         with self._lock:
             jobs = list(self._jobs.values())
         jobs.sort(key=lambda j: j.started, reverse=True)

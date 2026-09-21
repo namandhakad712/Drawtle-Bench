@@ -92,8 +92,16 @@ def main():
     svg = R.render_svg(maze, maze.entry, M.initial_heading(maze), 0.0,
                        P.default_camera(maze), P.WALL_H, show_heading=False)
     cache = os.path.join(ROOT, "results", "frames", "_preflight")
+    os.makedirs(cache, exist_ok=True)
+    # NEVER render into the hash-keyed frame cache for this check. The cache is
+    # keyed by SVG hash across interpreters, so a PNG left by a DIFFERENT python
+    # (the venv, say) makes this interpreter's "rasteriser works" check a cache
+    # hit -- preflight passes while `bench.py` under this same interpreter would
+    # die on its first real frame. The probe name is unique per process, so
+    # `rasterize` always actually renders.
+    probe = os.path.join(cache, f"_probe-{os.getpid()}.png")
     try:
-        png = F.render_frame(svg, cache)
+        png = F.rasterize(svg, probe)
         size = os.path.getsize(png)
         if size < 2000:
             return fail(f"PNG is only {size} bytes -- probably blank",

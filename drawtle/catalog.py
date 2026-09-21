@@ -35,6 +35,7 @@ import json
 import os
 import stat
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -163,6 +164,11 @@ def store_key(backend, key):
     tmp = CRED_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump({"keys": keys}, fh, indent=2)
+        fh.flush()
+        # Crash between dump and replace would silently lose the stored key
+        # (the file is the only copy a later run reads). fsync before the
+        # atomic publish so the rename cannot outrun the data.
+        os.fsync(fh.fileno())
     os.replace(tmp, CRED_FILE)
     try:
         os.chmod(CRED_FILE, stat.S_IRUSR | stat.S_IWUSR)
@@ -187,6 +193,8 @@ def clear_key(backend):
         tmp = CRED_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"keys": keys}, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, CRED_FILE)
         try:
             os.chmod(CRED_FILE, stat.S_IRUSR | stat.S_IWUSR)
@@ -341,6 +349,35 @@ def _request(url, key, auth, timeout=20.0):
         return json.loads(r.read().decode())
 
 
+def _request_with_deadline(url, key, auth, timeout=20.0):
+    """`_request` under a hard wall-clock deadline, not just per-socket timeouts.
+
+    `urlopen(timeout=...)` bounds each socket operation, not the whole request:
+    an endpoint that completes the TLS handshake and then trickles response
+    bytes never raises and the CLI hangs forever. The same pattern as
+    `models._post_with_deadline`: a worker thread + join(timeout); the worker is
+    a daemon, so a genuinely stuck socket dies with the process.
+    """
+    box = {}
+
+    def _run():
+        try:
+            box["ok"] = _request(url, key, auth, timeout=timeout)
+        except BaseException as e:                      # noqa: BLE001 - reported
+            box["err"] = e
+
+    th = threading.Thread(target=_run, daemon=True)
+    th.start()
+    th.join(timeout)
+    if "ok" in box:
+        return box["ok"]
+    if "err" in box:
+        raise box["err"]
+    raise TimeoutError(
+        f"discovery did not finish within {timeout:.0f}s (the endpoint "
+        f"stalled after connecting; the socket is abandoned)")
+
+
 def fetch_models(backend, key=None):
     """Ask the provider which models exist. Returns (ids, meta).
 
@@ -359,7 +396,11 @@ def fetch_models(backend, key=None):
         return [], {"ok": False, "error": "no key available",
                     "env": spec["env"], "source": None}
     try:
-        payload = _request(spec["url"], key, spec["auth"])
+        payload = _request_with_deadline(spec["url"], key, spec["auth"])
+    except TimeoutError as e:
+        return [], {"ok": False, "error": f"{e.__class__.__name__} "
+                                          f"({spec.get('url')}) stalled",
+                    "source": src}
     except urllib.error.HTTPError as e:
         hint = {401: "key rejected", 403: "key lacks permission for this route",
                 404: "discovery route not found"}.get(e.code, f"HTTP {e.code}")

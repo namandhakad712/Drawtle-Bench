@@ -220,7 +220,18 @@ def aggregate(jsonl_path, meta=None):
     # predates status tracking cannot be vouched for.
     if meta and meta.get("run_id"):
         out_dir = os.path.dirname(os.path.abspath(jsonl_path))
-        st = RS.read_status(out_dir, meta["run_id"])
+        # The status sidecar sits NEXT TO the jsonl in the nested (production)
+        # layout -- results/<model>/<run_id>/status.json. Resolving against
+        # `out_dir` with read_status() would treat the run directory as the
+        # results base, look for <run_dir>/<model>/<run_id>/ and fall back to
+        # flat names, finding nothing -- so every nested summary reported
+        # status=unknown even after a successful run. Read the adjacent file
+        # first; the resolver is the fallback for the flat layout.
+        st_path = os.path.join(out_dir, "status.json")
+        if os.path.exists(st_path):
+            st = RS.read_status_file(st_path, meta["run_id"])
+        else:
+            st = RS.read_status(out_dir, meta["run_id"])
         summary["status"] = st.get("status", RS.STATUS_UNKNOWN)
         if summary["status"] != RS.STATUS_SUCCESS:
             summary["status_note"] = st.get("note") or (

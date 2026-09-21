@@ -5,8 +5,12 @@
 # OS-level envelope for that contract.
 FROM python:3.13-slim
 
-# run as an unprivileged user, no shell for the model process
-RUN useradd --create-home --uid 1000 bench
+# run as an unprivileged user, no shell for the model process. The uid is a
+# build arg, not a constant: bind mounts preserve HOST ownership, so on a Linux
+# host whose user is not uid 1000 the container could never write results/.
+# Build with `--build-arg UID=$(id -u)` (compose passes ${UID:-1000}).
+ARG UID=1000
+RUN useradd --create-home --uid ${UID} bench
 WORKDIR /bench
 
 # Optional rasteriser for real VLM frames (SVG -> PNG). Installed as a non-root
