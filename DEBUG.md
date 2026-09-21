@@ -176,6 +176,25 @@ before `os.replace`.
 **Fix:** `pyproject.toml` — `cairosvg>=2.7,<3`, `playwright>=1.40,<2` (bounded
 so a raster upgrade cannot silently change what a replayed frame looks like).
 
+### Incident B · subprocess output decoded with the console codepage (crash after `docker compose build`)
+The control-console console printed a raw
+`Exception in thread Thread-33 (_readerthread): UnicodeDecodeError: 'charmap'
+codec can't decode byte 0x81 in position 20588` right after the health check.
+Cause: `subprocess.run(..., text=True)` **without** `encoding` decodes child
+output with the console codepage (cp1252 here). A `docker compose build` log
+>20 KB containing any byte that cp1252 leaves undefined kills the internal
+reader thread — which makes `subprocess.run` return **empty** output with rc 0
+(the build itself succeeds, the Docker panel shows nothing) and dumps the
+traceback onto the server console. Same latent bug in every other text-mode
+call (git, compose ps/images, docker info) — only the build/smoke logs are big
+enough to hit it in practice.
+**Fix:** every text-mode subprocess call now passes
+`encoding="utf-8", errors="replace"` — `web/server.py` (git ls-files, compose
+images/ps, compose actions) and `drawtle/sandbox.py` (docker info) — matching
+the pattern `web/supervisor.py` already used. Reproduced byte-for-byte (0x81 at
+position 20588) with the old pattern: `out_len=0` while rc=0; with the new
+pattern the full decoded stream comes back (`out_len=20689`, tail intact).
+
 ---
 
 ## What is already solid (re-verified, unchanged)

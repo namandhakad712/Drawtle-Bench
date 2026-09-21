@@ -53,7 +53,8 @@ def docker_available():
         return False, "docker CLI not on PATH"
     try:
         p = subprocess.run([exe, "info", "--format", "{{.ServerVersion}}"],
-                           capture_output=True, text=True, timeout=8)
+                           capture_output=True, text=True, timeout=8,
+                           encoding="utf-8", errors="replace")
     except Exception as exc:
         return False, f"docker info failed: {type(exc).__name__}"
     if p.returncode != 0:

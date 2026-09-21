@@ -355,7 +355,8 @@ def tracked_runs(dir_=None, refresh=False):
     try:
         import subprocess
         r = subprocess.run(["git", "ls-files", "-z", "--", "results"],
-                           cwd=ROOT, capture_output=True, text=True, timeout=20)
+                           cwd=ROOT, capture_output=True, text=True,
+                           timeout=20, encoding="utf-8", errors="replace")
         if r.returncode == 0:
             for rel in r.stdout.split("\0"):
                 if not rel:
@@ -956,14 +957,16 @@ def docker_status():
     exe = shutil.which("docker")
     try:
         imgs = subprocess.run([exe, "compose", "-f", _COMPOSE, "images", "-q"],
-                              cwd=ROOT, capture_output=True, text=True, timeout=20)
+                              cwd=ROOT, capture_output=True, text=True,
+                              timeout=20, encoding="utf-8", errors="replace")
         st["image_built"] = bool((imgs.stdout or "").strip())
     except Exception:
         pass
     try:
         ps = subprocess.run([exe, "compose", "-f", _COMPOSE, "ps",
                              "--format", "{{.Service}}\t{{.State}}\t{{.Status}}"],
-                            cwd=ROOT, capture_output=True, text=True, timeout=20)
+                            cwd=ROOT, capture_output=True, text=True,
+                            timeout=20, encoding="utf-8", errors="replace")
         for line in (ps.stdout or "").splitlines():
             parts = line.split("\t")
             if len(parts) >= 2:
@@ -1025,7 +1028,8 @@ def docker_action(action):
     exe = shutil.which("docker")
     try:
         p = subprocess.run([exe, *cmds[action]], cwd=ROOT,
-                           capture_output=True, text=True, timeout=600)
+                           capture_output=True, text=True, timeout=600,
+                           encoding="utf-8", errors="replace")
     except subprocess.TimeoutExpired:
         st = docker_status()
         st["last"] = {"action": action, "ok": False,
