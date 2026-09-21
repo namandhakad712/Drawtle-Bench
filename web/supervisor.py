@@ -44,6 +44,7 @@ between the click and the signal is never relabelled.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -69,6 +70,10 @@ _POLL_S = 0.4
 
 #: Windows exit status for "terminated by Ctrl-C / Ctrl-Break".
 WINDOWS_CTRL_C_EXIT = 0xC000013A
+
+#: `bench.py run` prints `run_id   : <id>` immediately after resolving a blank
+#: run id, which is the moment the job can adopt the child's real identity.
+_RUN_ID_RE = re.compile(r"^run_id\s*:\s*(\S+)\s*$")
 
 
 class Job:
@@ -118,6 +123,24 @@ class Job:
         with self._lock:
             return list(self._tail)
 
+    def adopt_run_id(self, run_id):
+        """Adopt the child's real run id, printed right after it starts.
+
+        A launch that leaves the run id blank has the CHILD choose one, so the
+        supervisor is stuck with `(auto)` until the child says what it picked --
+        and a stop clicked before that line arrives would otherwise record the
+        interruption against a run called `(auto)` while the real run stays
+        `started` forever. The id is validated before adoption: it reaches
+        path construction in the stop path, so it must be a plain name.
+        """
+        if not run_id or self.run_id != "(auto)":
+            return
+        from . import guard as G
+        if not G.safe_run_id(run_id):
+            return
+        with self._lock:
+            self.run_id = run_id
+
     @property
     def log_path(self):
         """`<logs_dir>/<model>/<run_id>.log`.
@@ -133,8 +156,9 @@ class Job:
         leaves junk that looks like a real run.
         """
         from drawtle.runstate import slugify
-        return os.path.join(self.logs_dir, slugify(self.model),
-                            str(self.run_id or self.job_id) + ".log")
+        name = str(self.run_id) if (self.run_id and self.run_id != "(auto)") \
+            else str(self.job_id)
+        return os.path.join(self.logs_dir, slugify(self.model), name + ".log")
 
     # -- state -----------------------------------------------------------
 
@@ -358,6 +382,9 @@ class Supervisor:
             try:
                 for line in job.proc.stdout:
                     job._append(line)
+                    m = _RUN_ID_RE.match(line.rstrip("\n"))
+                    if m:
+                        job.adopt_run_id(m.group(1))
             except Exception as e:                 # pragma: no cover - rare
                 job._append(f"[supervisor] read error: {type(e).__name__}: {e}")
             job.returncode = job.proc.wait()
@@ -460,22 +487,32 @@ class Supervisor:
           is the case that was missing: returning early on `unknown` left a
           stopped run with no record at all, and a run with no record is
           indistinguishable from one that never ran.
+
+        The run id is resolved first. The child picks one when the launch left
+        it blank, so `(auto)` is only ever a placeholder; recording an
+        interruption against a run named `(auto)` orphaned the real run in
+        `started` forever.
         """
         try:
             from drawtle import runstate as RS
         except Exception:
             return False
-        status = RS.status_of(self.results_dir, job.run_id)
-        if status not in (RS.STATUS_STARTED, RS.STATUS_UNKNOWN):
+        if job.run_id == "(auto)":
+            found = self._resolve_run_id(job)
+            if found:
+                job.adopt_run_id(found)
+        rid = job.run_id
+        status = RS.status_of(self.results_dir, rid)
+        if rid == "(auto)" or status not in (RS.STATUS_STARTED, RS.STATUS_UNKNOWN):
             return False                       # it finished on its own; leave it
         try:
             extra = {
-                "n_turns_written": self._turns_written(job.run_id),
+                "n_turns_written": self._turns_written(rid),
                 "note": "stopped from the control centre. The operating system "
                         "terminated the run before it could record its own "
                         "outcome, so the interruption is recorded on its behalf. "
                         "Any episodes that completed are in the checkpoint.",
-                "resume_hint": f"--resume --run-id {job.run_id}",
+                "resume_hint": f"--resume --run-id {rid}",
                 "stopped_by": "control-centre",
             }
             if status == RS.STATUS_UNKNOWN:
@@ -490,12 +527,42 @@ class Supervisor:
                     "started_iso": job.started_iso,
                     "status_before_stop": None,
                 })
-            RS.mark_interrupted(self.results_dir, job.run_id, extra)
+            RS.mark_interrupted(self.results_dir, rid, extra)
             job._append("[supervisor] run recorded as interrupted")
             return True
         except Exception as e:                 # pragma: no cover - rare
             job._append(f"[supervisor] could not record the interruption: {e}")
             return False
+
+    def _resolve_run_id(self, job):
+        """Find the run this job actually created, or None.
+
+        The candidate pool is every run still marked `started` whose model and
+        backend match the job's -- the child writes its status record before any
+        model call, so a matching `started` run is unambiguously this job's.
+        The newest wins, which only matters if a server restarted mid-job and
+        two `started` runs of the same model exist (the old one then looks
+        stalled; the new one is the one being stopped).
+        """
+        try:
+            from drawtle import runstate as RS
+            from drawtle import stats as ST
+        except Exception:
+            return None
+        best = None
+        try:
+            for rid, run in ST.enumerate_runs(self.results_dir).items():
+                st = run["record"] or {}
+                if st.get("status") != RS.STATUS_STARTED:
+                    continue
+                if (st.get("model"), st.get("backend")) != (job.model, job.backend):
+                    continue
+                ts = st.get("started_at") or 0
+                if best is None or ts > best[2]:
+                    best = (rid, st, ts)
+        except Exception:                     # pragma: no cover - defensive
+            return None
+        return best[0] if best else None
 
     def _turns_written(self, run_id):
         """How many turn records reached the log before the stop."""

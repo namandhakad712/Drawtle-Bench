@@ -3,34 +3,38 @@ __pycache__/
 .env
 
 # ---- generated run artifacts ------------------------------------------------
-# A run writes a family of files, not one. Listing only some of them meant the
-# rest (status, checkpoint, transcript) showed up as untracked after every run
-# and were one `git add -A` away from being committed. Anything a run produces
-# belongs here, so the rule is stated as a family rather than file by file.
+# Live (real-model) runs ARE the measurement, and they are committed: a result
+# that cannot be checked into the repo cannot be audited or compared. Only
+# SELF-TEST runs -- the `mock` backend, stamped `mode=test` -- are excluded: a
+# mock scores about 100% by construction, and committing one is how a fake
+# result becomes a shipped one. Re-running a mock replaces it; re-running a
+# real model costs money, so its record has to be kept.
 #
-# Both layouts: flat `results/<run_id>.<ext>` and nested
-# `results/<model>/<run_id>/<ext>`. The nested layout arrived after these rules
-# were written, and the gap left every nested run visible as untracked noise
-# after every run.
+# Layouts: current runs are nested results/<model>/<run_id>/; legacy runs are
+# flat files in results/. Mock runs are covered by name on both layouts.
+results/mock/
+results/run-mock-*
+results/mock-*
+# Legacy flat artifacts: only mock runs ever existed in the flat layout (live
+# runs have always been nested), and those are covered by name above -- these
+# rules are the safety net for anything else a stray process drops in the root.
 results/*.jsonl
 results/*.jsonl.transcript.json
 results/*.summary.json
 results/*.status.json
 results/*.done.json
 results/*.html
-results/*/*.jsonl
-results/*/*.jsonl.transcript.json
-results/*/*.summary.json
-results/*/*.status.json
-results/*/*.done.json
-results/*/*.html
-results/dataset*.json
+results/*.log
+# Frames are a derived cache -- reproducible from the SVGs, never a result.
 results/frames/
 results/*/frames/
-
-# A per-model directory holding only ignored files is empty from git's point of
-# view; the directory itself is not tracked either.
-results/*/
+# Dataset manifests are generated, but the preset ladder is committed so every
+# machine and every CI run has exactly the same 200/100/50/20 sets.
+results/dataset*.json
+!results/dataset-200.json
+!results/dataset-100.json
+!results/dataset-50.json
+!results/dataset-20.json
 
 # Committed on purpose, so the list above does not hide them: the reference
 # fixtures the tests assert against. `!` must come after the exclusion.

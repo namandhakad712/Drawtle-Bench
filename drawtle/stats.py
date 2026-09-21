@@ -292,6 +292,12 @@ def candidate_runs(results_dir):
             d = os.path.join(sub, rid)
             if not os.path.isdir(d) or rid in seen:
                 continue
+            # A run id is a path component in several readers, including the
+            # stop/delete paths. `(auto)` belongs there -- it is what the
+            # supervisor used to record an interruption against before the
+            # child's real id was known -- and it must not read as a run.
+            if not RS._SAFE_RUN_ID.match(str(rid)):
+                continue
             paths = RS.dir_paths(d)
             if not (os.path.exists(paths["summary"])
                     or os.path.exists(paths["status"])):
@@ -310,6 +316,8 @@ def candidate_runs(results_dir):
         for p in sorted(glob.glob(os.path.join(results_dir, "*" + suf))):
             rid = os.path.basename(p)[: -len(suf)]
             if rid in seen:
+                continue
+            if not RS._SAFE_RUN_ID.match(str(rid)):
                 continue
             seen.add(rid)
             yield rid, RS.flat_paths(results_dir, rid)
@@ -379,7 +387,8 @@ def enumerate_runs(results_dir):
     return out
 
 
-def leaderboard(results_dir, pattern="*.summary.json", only_clean=True, mode=None):
+def leaderboard(results_dir, pattern="*.summary.json", only_clean=True, mode=None,
+                dataset=None):
     """Rank all runs in a directory by progress rate.
 
     `only_clean=True` (the default) keeps runs whose status is not `success` out
@@ -396,6 +405,13 @@ def leaderboard(results_dir, pattern="*.summary.json", only_clean=True, mode=Non
     ~100% by construction, so ranking one beside a real model is not a mistake
     of degree -- it is a fabricated leaderboard. Filtering here means no caller
     can forget to.
+
+    `dataset` restricts the ranking to runs scored against one dataset hash.
+    Progress is measured per maze; a 20-maze run and a 200-maze run are two
+    different measurements even on the same model, so ranking them together is
+    the same category of error as ranking a mock beside a real model. A run
+    with no recorded hash (predates dataset tracking) is excluded whenever a
+    filter is set -- unproven, not zero.
     """
     rows = []
     for rid, run in enumerate_runs(results_dir).items():
@@ -407,6 +423,14 @@ def leaderboard(results_dir, pattern="*.summary.json", only_clean=True, mode=Non
         run_mode, mode_source = RS.mode_of(run["record"], s)
         if mode is not None and run_mode != mode:
             continue
+        if dataset is not None:
+            dh = s.get("dataset_hash") or ""
+            # Prefix match: a run records the full hash; a caller may hold a
+            # truncated one (older dashboard renders), and matching by prefix
+            # keeps both sides workable without weakening the filter -- two
+            # different datasets never share a 16-hex prefix.
+            if not dh.startswith(dataset):
+                continue
         rows.append({
             "model": s.get("model"),
             "backend": s.get("backend"),
@@ -419,6 +443,7 @@ def leaderboard(results_dir, pattern="*.summary.json", only_clean=True, mode=Non
             "invalid_rate": s.get("invalid_rate"),
             "n_episodes": s.get("n_episodes"),
             "total_cost_usd": s.get("total_cost_usd"),
+            "dataset_hash": s.get("dataset_hash"),
             "file": os.path.basename(run["path"]) if run["path"] else f"{rid}.jsonl",
             "run_id": rid,
         })

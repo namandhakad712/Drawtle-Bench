@@ -39,7 +39,7 @@ os.environ["DRAWTLE_SETTINGS_FILE"] = os.path.join(_TMP_CFG, "settings.json")
 
 PORT = 8491
 BASE = f"http://127.0.0.1:{PORT}"
-TABS = ("overview", "providers", "models", "launch", "results",
+TABS = ("overview", "live", "providers", "models", "launch", "results",
         "replays", "storyboard", "analytics", "integrity", "logs",
         "system", "settings")
 
@@ -123,6 +123,23 @@ def main():
 
             check("no javascript error was raised on any tab", not errors,
                   "; ".join(errors[:5]))
+
+            # This release adds the dataset filter to the Overview leaderboard
+            # (runs are comparable only within one dataset) and the live window
+            # (a real-time turn stream). Both must render in a real browser.
+            pg.click('#side nav button[data-view="overview"]')
+            try:
+                pg.wait_for_selector("#lb-ds", timeout=15000)
+                ds_ok = True
+            except Exception:                                  # noqa: BLE001
+                ds_ok = False
+            check("the Overview leaderboard offers a dataset filter",
+                  ds_ok, "no #lb-ds control appeared")
+            pg.click('#side nav button[data-view="live"]')
+            pg.wait_for_timeout(600)
+            live_txt = pg.inner_text("#view")
+            check("the Live window view renders",
+                  "Live window" in live_txt, live_txt[:140])
 
             # M4: the System view shows the API-keys panel with a save control
             # per provider. The tab already rendered in the loop above; this
@@ -338,16 +355,23 @@ def main():
 
             # ---- M6: analytics + integrity render -----------------------
             # (Test mode is on from the Results section, so these aggregate the
-            # committed mock runs rather than an empty live view.)
+            # committed mock runs rather than an empty live view.) These wait
+            # for the spinner to leave, not a fixed sleep: the aggregate reads
+            # every run's log, which under CPU contention can take longer than
+            # any fixed wait -- and a flaky check is a check nobody trusts.
             pg.click('#side nav button[data-view="analytics"]')
-            pg.wait_for_selector("#view")
-            pg.wait_for_timeout(450)
+            pg.wait_for_function(
+                "() => { const v = document.querySelector('#view');"
+                " return v && !v.querySelector('.spin') && v.innerHTML.length > 200; }",
+                timeout=25000)
             an_txt = pg.inner_text("#view")
             check("the Analytics view renders with a by-provider table",
                   "Analytics" in an_txt and "By provider" in an_txt, an_txt[:140])
             pg.click('#side nav button[data-view="integrity"]')
-            pg.wait_for_selector("#view")
-            pg.wait_for_timeout(450)
+            pg.wait_for_function(
+                "() => { const v = document.querySelector('#view');"
+                " return v && !v.querySelector('.spin') && v.innerHTML.length > 200; }",
+                timeout=25000)
             ig_txt = pg.inner_text("#view")
             check("the Integrity view renders",
                   "Integrity" in ig_txt, ig_txt[:140])
