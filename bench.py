@@ -425,7 +425,7 @@ def _p(v):
 
 
 def cmd_serve(a):
-    SRV.serve(a.dir, a.host, a.port)
+    SRV.serve(a.dir, a.host, a.port, open_browser=not a.no_open)
 
 
 def cmd_migrate(a):
@@ -600,6 +600,8 @@ def main(argv=None):
     sv.add_argument("--dir", default="results")
     sv.add_argument("--port", type=int, default=8080)
     sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--no-open", action="store_true",
+                    help="do not open the control centre in a browser automatically")
     sv.set_defaults(func=cmd_serve)
 
     rp = sub.add_parser("report")

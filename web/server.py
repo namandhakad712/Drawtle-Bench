@@ -18,6 +18,7 @@ and every route is bounded:
   GET   /api/unknown            which limits are still unknown, and why
   GET   /api/probe              ask providers live (no cache)
   GET   /api/jobs               processes this server started
+  GET   /api/cost-estimate      project a run's cost (local price table only)
   GET   /api/docker             docker availability + sandbox container state
   GET   /api/preflight          would this run start? (no network)
 
@@ -407,6 +408,39 @@ def _dataset_arg(q):
         raise ValueError("dataset must be a content hash such as "
                          "sha256:0123456789abcdef")
     return raw
+
+
+def cost_estimate(results_dir, dataset_path, model, limit=0):
+    """Project a run's cost for the Launch tab. Reads the local price table
+    only -- no model call, no network. Honest shape inherited from
+    `cost.estimate`: a model with no published price still gets a token
+    projection and `cost_known: false`, never a guessed dollar figure.
+
+    `dataset_path` must point inside the results directory: the Launch tab
+    offers paths from that directory, and an arbitrary path read here would be
+    a file-exfiltration primitive, however harmless localhost makes one.
+    """
+    if not str(model or "").strip():
+        return {"error": "a model id is required"}, 400
+    try:
+        n = int(limit or 0)
+    except (TypeError, ValueError):
+        return {"error": "limit must be a whole number"}, 400
+    real = os.path.realpath(str(results_dir))
+    rp = os.path.realpath(str(dataset_path or ""))
+    if not rp.startswith(real + os.sep) or not os.path.exists(rp):
+        return {"error": "dataset must be a manifest inside the results "
+                         "directory"}, 404
+    man = _read_json(rp) or {}
+    mazes = man.get("mazes") or []
+    if not mazes:
+        return {"error": "the dataset has no mazes"}, 400
+    if n > 0:
+        man = dict(man)
+        man["mazes"] = mazes[:n]
+        man["count"] = len(man["mazes"])
+    est = CO.estimate(man, str(model).strip(), n_episodes=(n or None))
+    return {"dataset": os.path.basename(rp), "estimate": est}, 200
 
 
 def prune_runs(dir_, older_than_days=0, mode=None, logs_dir=None, dry_run=False,
@@ -1227,6 +1261,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(DSC.unknown_metric_report())
             elif path == "/api/jobs":
                 self._json({"jobs": self.sup.list() if self.sup else []})
+            elif path == "/api/cost-estimate":
+                data, code = cost_estimate(
+                    self.results_dir, q.get("dataset") or "",
+                    q.get("model") or "", q.get("limit") or 0)
+                self._json(data, code=code)
             elif path == "/api/live":
                 self._json(LV.live_runs(self.results_dir, self.sup))
             elif path.startswith("/api/live/") and path.count("/") == 3:
@@ -1730,7 +1769,7 @@ def make_server(dir_, host, port, supervisor=None, logs_dir="logs"):
     return httpd, sup
 
 
-def serve(dir_="results", host="127.0.0.1", port=8080):
+def serve(dir_="results", host="127.0.0.1", port=8080, open_browser=False):
     # One control centre per directory, period. A second `serve` on the same
     # port silently steals the URL from the first, and with two supervisors
     # alive the two pages disagree about which runs are "running" -- the
@@ -1752,6 +1791,15 @@ def serve(dir_="results", host="127.0.0.1", port=8080):
     print("  runs started here are child processes; they survive this page "
           "being closed.")
     _startup_health(dir_)
+    if open_browser:
+        # Best effort: opening a browser is a convenience, never a requirement.
+        # It runs in a thread so a browser that refuses to launch cannot block
+        # the server from listening.
+        import threading
+        import webbrowser
+        threading.Thread(
+            target=lambda: webbrowser.open(f"http://{host}:{port}"),
+            daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -261,6 +261,14 @@ def live_runs(results_dir, sup=None):
         is_fresh = bool(finished_at) and (now - float(finished_at)) < 3600
         if not (is_running or is_fresh):
             continue
+        # A run marked `started` whose process left no supervisor job and whose
+        # status is older than half an hour is a zombie, not a live run (the
+        # agnes case: killed, status file forgotten). Offering a dead run as
+        # "live" misleads -- and its multi-thousand-turn catch-up is what made
+        # opening the window slow.
+        fresh_start = bool(started_at) and (now - float(started_at)) < 1800
+        if is_running and not (rid in supervised or fresh_start):
+            continue
         jsonl = run["paths"]["jsonl"]
         n_turns = 0
         if os.path.exists(jsonl):

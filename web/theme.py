@@ -485,6 +485,20 @@ img.strip:hover{border-color:var(--blue); transform:scale(1.06)}
 }
 .q:hover{background:var(--blue-bg); border-color:var(--blue-rule); color:var(--blue)}
 
+/* ---------- instant tooltip ----------
+   One floating element for every title/data-tooltip on the page, shown on
+   hover with NO OS delay. The control centre replaces the slow native title
+   with this; the JS reads `title` once, keeps the text for screen readers via
+   aria-label, and removes the attribute so the native tooltip never fires.
+   Positioned above the target; below when there is no room. */
+#tip{position:fixed; z-index:10000; max-width:340px; padding:7px 10px;
+  font:11.6px/1.5 var(--sans); color:var(--bg); background:var(--ink);
+  border-radius:9px; box-shadow:0 6px 22px rgba(0,0,0,.28);
+  opacity:0; transform:translateY(3px); pointer-events:none;
+  transition:opacity .06s ease, transform .06s ease; white-space:pre-wrap;
+  word-break:break-word; overflow-wrap:anywhere}
+#tip.on{opacity:1; transform:none}
+
 /* ---------- sortable table headers ---------- */
 th.sortable{cursor:pointer; user-select:none; white-space:nowrap}
 th.sortable:hover{color:var(--blue)}

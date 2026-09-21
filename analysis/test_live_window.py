@@ -27,6 +27,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -336,6 +337,22 @@ def test_routes():
               f"{st5} n={len(lb20['rows'])} {str(lb20['rows'])[:160]}")
         check("bad dataset hash is a 400",
               req("/api/leaderboard?dataset=not%20a%20hash!")[0] == 400)
+        st8, est = req("/api/cost-estimate?dataset="
+                       + urllib.parse.quote(os.path.join(results_dir, "dataset-20.json"))
+                       + "&model=mock&limit=3", timeout=30)
+        check("cost estimate answers for a local dataset",
+              st8 == 200 and est["estimate"]["n_episodes"] == 3
+              and "projected_total_tokens" in est["estimate"],
+              f"{st8} {str(est)[:160]}")
+        check("cost estimate names the dataset",
+              est.get("dataset") == "dataset-20.json", est.get("dataset"))
+        st9, _ = req("/api/cost-estimate?dataset="
+                     + urllib.parse.quote(os.path.join(work, "secret.json"))
+                     + "&model=mock")
+        check("cost estimate refuses a path outside results", st9 == 404, str(st9))
+        st10, _ = req("/api/cost-estimate?dataset="
+                      + urllib.parse.quote(os.path.join(results_dir, "dataset-20.json")))
+        check("cost estimate requires a model id", st10 == 400, str(st10))
         st6, runs = req("/api/runs")
         row = next((r for r in runs["runs"] if r["run_id"] == "lv-on-20"), None)
         check("runs list carries dataset_hash", row is not None and row["dataset_hash"],
