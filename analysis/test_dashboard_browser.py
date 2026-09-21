@@ -352,6 +352,53 @@ def main():
             check("the Integrity view renders",
                   "Integrity" in ig_txt, ig_txt[:140])
 
+            # ---- Vision probe (test-mode-only tab) ----------------------
+            # Test mode is ON from the Results section, so the Diagnostics group
+            # with the vprobe entry must be visible now. The probe is the one
+            # tab that turns a real endpoint call (render-only here: no key, no
+            # model call, just prove the environment produces a maze image that
+            # the UI can display).
+            probe_visible = pg.evaluate(
+                "() => { const b = document.querySelector("
+                "'#side nav button[data-view=\"vprobe\"]');"
+                " return b && b.style.display !== 'none' && "
+                "getComputedStyle(b).display !== 'none'; }")
+            check("the vision-probe entry is visible in test mode",
+                  probe_visible, "entry hidden while test mode is on")
+            pg.click('#side nav button[data-view="vprobe"]')
+            pg.wait_for_selector("#vp-ask", timeout=8000)
+            vp_txt = pg.inner_text("#view")
+            check("the Vision probe view renders",
+                  "Vision probe" in vp_txt and "Model under test" in vp_txt,
+                  vp_txt[:160])
+            # Render-only: no model id from the registry is required to be a
+            # real vision model for this step, but the form demands a model id,
+            # so use the mock.
+            pg.fill("#vp-model", "mock")
+            pg.click("#vp-preview")
+            pg.wait_for_function(
+                "() => { const im = document.querySelector('#vp-out .vp-frame img');"
+                " return !!im && im.src.startsWith('data:image/png'); }",
+                timeout=20000)
+            check("render-only shows the maze frame as a data URI",
+                  True, "no .vp-frame image appeared")
+            vp_txt2 = pg.inner_text("#view")
+            check("render-only reports that no model was called",
+                  "No model was called" in vp_txt2, vp_txt2[:200])
+            # The entry must vanish again when leaving test mode -- live mode
+            # must not offer a diagnostic that its server would refuse.
+            pg.click("#tg-test")
+            pg.wait_for_timeout(900)
+            probe_hidden = pg.evaluate(
+                "() => { const b = document.querySelector("
+                "'#side nav button[data-view=\"vprobe\"]');"
+                " return b && (b.style.display === 'none' || "
+                "getComputedStyle(b).display === 'none'); }")
+            check("the vision-probe entry hides when test mode turns off",
+                  probe_hidden, "entry still visible in live mode")
+            pg.click("#tg-test")      # back to test mode for any later checks
+            pg.wait_for_timeout(900)
+
             br.close()
     finally:
         httpd.shutdown()

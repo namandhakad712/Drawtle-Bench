@@ -390,6 +390,27 @@ img.strip{
 }
 img.strip:hover{border-color:var(--blue); transform:scale(1.06)}
 
+/* ---------- vision probe (test mode only) ---------- */
+.vp-frame img{
+  max-width:100%; max-height:340px; object-fit:contain; cursor:zoom-in;
+  border:1px solid var(--rule); border-radius:var(--r3); background:#fff;
+}
+.vp-answer{
+  margin-top:10px; border:1px solid var(--rule); border-radius:var(--r3);
+  background:var(--panel); overflow:hidden;
+}
+.vp-answer-head{
+  display:flex; align-items:center; gap:10px; padding:8px 12px;
+  border-bottom:1px solid var(--rule); background:var(--blue-bg);
+  font-size:12px; color:var(--blue);
+}
+.vp-answer-head .lnk{margin-left:auto}
+.vp-answer pre{
+  margin:0; padding:12px; max-height:420px; overflow:auto;
+  white-space:pre-wrap; word-break:break-word; font-family:var(--mono);
+  font-size:12.5px; line-height:1.55; color:var(--ink);
+}
+
 /* ---------- batch selection ---------- */
 .sel-col{width:34px; text-align:center}
 .sel-col input{accent-color:var(--blue); width:15px; height:15px; cursor:pointer}

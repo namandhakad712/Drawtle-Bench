@@ -1216,6 +1216,10 @@ class _Handler(BaseHTTPRequestHandler):
                     "version": VERSION,
                     "default_provider": os.environ.get("DRAWTLE_BACKEND", ""),
                     "default_model": os.environ.get("DRAWTLE_MODEL", ""),
+                    # The sidebar renders test-only views (the vision probe)
+                    # from this flag, hidden unless it is set. Read once at page
+                    # load; the header pill toggles their visibility live.
+                    "test_mode": bool(SET.read().get("test_mode")),
                 }))
             elif path == "/api/system":
                 self._json(_system(self.results_dir))
@@ -1490,6 +1494,61 @@ class _Handler(BaseHTTPRequestHandler):
                                    "output": out,
                                    "status": st},
                                   code=200 if ok else 502)
+            if path == "/api/vision-probe":
+                # The vision probe is a TEST-MODE-ONLY feature, and the server
+                # is the gate, not the client. A hidden tab is cosmetic, and a
+                # route that only a hidden button can reach is still a route --
+                # so this endpoint answers 403 unless test mode is on. Test mode
+                # is the bench's "I am playing, not measuring" state, which is
+                # the only place a free-form "ask the model anything" panel
+                # belongs: in live mode this page is read as evidence about a
+                # model, and a probe answer is not evidence of anything.
+                #
+                # It is deliberately not a run: nothing is scored, nothing lands
+                # in results/, and the frame is rendered to a temp directory.
+                if not SET.read().get("test_mode"):
+                    return self._err(
+                        "the vision probe is only available in test mode. Turn "
+                        "test mode on (the pill in the header) first -- it is a "
+                        "diagnostic, not a run, and it is kept out of live mode "
+                        "on purpose.", 403)
+                from drawtle import vision_probe as VP
+                backend = str(body.get("backend") or "").strip()
+                model = str(body.get("model") or "").strip()
+                if not model:
+                    return self._err("a model id is required", 400)
+                # An absent/blank provider means "resolve it from the model id",
+                # the same convention the launcher uses.
+                try:
+                    spec = VP.probe_spec(
+                        size=body.get("size") or 11,
+                        pair=body.get("pair") or "NW",
+                        seed=body.get("seed") or None)
+                except VP.VisionProbeError as e:
+                    return self._err(str(e), 400)
+                # `render_only` previews the frame and verifies this environment
+                # can produce one, with no model call and no key. The cheapest
+                # and most useful first step, so it is a first-class option.
+                render_only = bool(body.get("render_only"))
+                try:
+                    timeout = float(body.get("timeout_s") or 90.0)
+                except (TypeError, ValueError):
+                    timeout = 90.0
+                try:
+                    out = VP.probe_vision(
+                        backend or None, model, spec=spec,
+                        prompt=str(body.get("prompt") or VP.PROBE_PROMPT),
+                        max_tokens=int(body.get("max_tokens")
+                                       or VP.DEFAULT_MAX_TOKENS),
+                        render_only=render_only,
+                        timeout_s=min(max(timeout, 10.0), 300.0))
+                except VP.VisionProbeError as e:
+                    return self._err(str(e), 400)
+                except Exception as e:                      # noqa: BLE001
+                    return self._err(f"probe failed: {type(e).__name__}: {e}",
+                                     500)
+                out["test_mode"] = True
+                return self._json(out)
             return self._err("no such endpoint", 404)
         except (DSC.OverlayWriteError, SET.SettingsWriteError) as e:
             # Not a 500: the request was well formed and the server is fine, it
