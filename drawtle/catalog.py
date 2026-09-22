@@ -636,6 +636,24 @@ def _cmd_price_update(a):
         print("  endpoint; edit drawtle/model_registry.json by hand from the")
         print("  provider's pricing page. Leaving a field null is correct --")
         print("  it marks a lookup to do rather than inventing a number.")
+    # A real price with no `price_known` flag is a state worth resolving rather
+    # than a missing field: the run-time accounting path prices the model, but
+    # the pre-run estimate reports UNKNOWN unless it is flagged. Naming them
+    # keeps the two paths from disagreeing about the same model.
+    unflagged = sorted(n for n, m in models.items()
+                       if not m.get("price_known")
+                       and (m.get("price_in") or m.get("price_out")) is not None
+                       and ((m.get("price_in") or 0) > 0
+                            or (m.get("price_out") or 0) > 0))
+    if unflagged:
+        print(f"  {len(unflagged)} model(s) priced but missing price_known:")
+        for n in unflagged:
+            print(f"    {n:<30} price_in={models[n].get('price_in')} "
+                  f"price_out={models[n].get('price_out')}")
+        print()
+        print("  These ARE priced at run time. Add \"price_known\": true when")
+        print("  the figure is source-backed, so the pre-run estimate agrees")
+        print("  with the post-run accounting.")
     else:
         print("  no gaps: every model has limits and pricing.")
     return 0

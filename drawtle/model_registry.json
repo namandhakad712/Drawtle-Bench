@@ -178,7 +178,8 @@
         "image_in",
         "tool_use"
       ],
-      "capability_source": "api"
+      "capability_source": "api",
+      "price_known": true
     },
     "gpt-4o-mini": {
       "provider": "openai",
@@ -198,7 +199,8 @@
         "image_in",
         "tool_use"
       ],
-      "capability_source": "api"
+      "capability_source": "api",
+      "price_known": true
     },
     "claude-3-5-sonnet": {
       "provider": "anthropic",
@@ -218,7 +220,8 @@
         "image_in",
         "tool_use"
       ],
-      "capability_source": "api"
+      "capability_source": "api",
+      "price_known": true
     },
     "claude-3-5-haiku": {
       "provider": "anthropic",
@@ -238,7 +241,8 @@
         "image_in",
         "tool_use"
       ],
-      "capability_source": "api"
+      "capability_source": "api",
+      "price_known": true
     },
     "mock": {
       "provider": "local",

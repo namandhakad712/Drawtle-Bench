@@ -60,19 +60,20 @@ def estimate(dataset, model, n_episodes=None, max_turns=None,
     sizes = [m.get("size") for m in mazes[:n] if isinstance(m, dict)]
     turns = max_turns or 48
 
-    # Input grows with turn count because every prior frame is re-sent. The
-    # per-turn average is therefore an average over a growing sequence, not a
-    # constant, and a naive turns * per_turn understates a long episode. The
-    # default 42/6 comes from the committed mock runs, where the counts are
-    # measured; using the mock's numbers to project a real model is honest as
-    # long as the basis says so.
+    # Input grows with turn count because every prior frame is re-sent: turn t
+    # carries t prior observations, so the episode total is the SUM of a growing
+    # sequence, not a constant times the turn count. The old form multiplied the
+    # triangular term by (per_turn / (turns/2)), which divided by the sequence's
+    # midpoint and cancelled the growth -- a 48-turn episode came out ~24x too
+    # low, and a budget check quoted ~4% of a real paid bill.
     pin_per_turn = prompt_tokens_per_turn or 42.0
     pout_per_turn = output_tokens_per_turn or 6.0
-    # Triangular growth: turn t carries t prior observations, so the episode
-    # total is ~ (turns * (turns + 1) / 2) * per_turn_for_turn_1.
+    # `pin_per_turn` is what TURN 1 costs. Turn t costs ~(t+1) * pin_per_turn,
+    # so the episode is pin_per_turn * (1 + 2 + ... + turns) and the run is that
+    # times the episode count.
     growth = (turns * (turns + 1)) / 2.0
 
-    in_tokens = int(growth * (pin_per_turn / max(1.0, turns / 2.0)) * n)
+    in_tokens = int(growth * pin_per_turn * n)
     out_tokens = int(turns * pout_per_turn * n)
 
     price_in = _num(usd_per_1k_in)
@@ -81,8 +82,16 @@ def estimate(dataset, model, n_episodes=None, max_turns=None,
     if not priced:
         price_in = _num(info.get("price_in"))
         price_out = _num(info.get("price_out"))
-        priced = info.get("price_known") and (
-            price_in is not None or price_out is not None)
+        # The SAME test the per-call accounting path uses
+        # (models.ModelBackend._cost): a price is usable when it is
+        # source-backed OR non-zero. The legacy DEFAULT_PRICES models carry a
+        # real price with no `price_known` field, and the two paths used to
+        # disagree -- the run itself priced the model while the pre-run
+        # projection reported UNKNOWN, quoting no figure for a run that then
+        # produced a real dollar total.
+        priced = bool(info.get("price_known")) or (
+            price_in is not None and price_in > 0) or (
+            price_out is not None and price_out > 0)
 
     usd = None
     if priced:
@@ -104,6 +113,15 @@ def estimate(dataset, model, n_episodes=None, max_turns=None,
             "turns_per_episode": turns,
             "tokens_per_turn_in": pin_per_turn,
             "tokens_per_turn_out": pout_per_turn,
+            # The input default is a TEXT-ONLY mock's measured count: the mock
+            # backend's usage is len(text)/4 and carries no image. A real vision
+            # turn adds ~750 tokens of image (catalog.estimate_request_tokens),
+            # so scale the per-turn input by that when projecting a vision run,
+            # or pass prompt_tokens_per_turn from a measured run of the model.
+            "tokens_per_turn_in_note": (
+                "per-turn input is a text-only mock figure; a vision run adds "
+                "~750 tokens/turn per frame" if prompt_tokens_per_turn is None
+                else "per-turn input supplied by the caller"),
             "price_source": ("argument" if usd_per_1k_in is not None
                              else "model_registry.json" if priced else None),
             "window": info.get("context_window"),
