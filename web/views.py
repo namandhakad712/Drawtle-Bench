@@ -2547,8 +2547,13 @@ RENDER.system = async function (v) {{
   // daemon can take several seconds, and a slow probe must not pin the whole
   // System view on a spinner -- the isolation and config panels are independent
   // of it and should not wait.
+  // The server caches machine facts per process; `refresh=1` is what "Reload
+  // system data" sends so a re-read is actually a re-read (docker started or
+  // stopped while the dashboard was open is a real, common change).
+  const fresh = window.__sysRefresh ? "?refresh=1" : "";
+  if (window.__sysRefresh) {{ window.__sysRefresh = false; }}
   const [sys, ov, unknown, keys] = await Promise.all([
-    apiWithRetry("/api/system"), apiWithRetry("/api/overlay"),
+    apiWithRetry("/api/system" + fresh), apiWithRetry("/api/overlay"),
     apiWithRetry("/api/unknown"), apiWithRetry("/api/keys")
   ]);
   setPills(sys, null);
@@ -2695,6 +2700,7 @@ RENDER.system = async function (v) {{
       reloadBtn.disabled = true;
       reloadBtn.textContent = "reloading\u2026";
       try {{
+        window.__sysRefresh = true;
         await show("system");
         toast("system data reloaded", "good");
       }} catch (e) {{

@@ -1313,15 +1313,15 @@ def _money(v):
 # ----------------------------------------------------------------- endpoints ---
 
 
-def _system(dir_):
+def _system(dir_, refresh=False):
     n, path = DSC.load_dotenv()
     from drawtle import frames as FR
     return {
         "version": VERSION,
         "python": sys.version.split()[0],
         "interpreter": sys.executable,
-        "sandbox": _cached_sandbox(),
-        "rasteriser": _cached_rasteriser(FR),
+        "sandbox": _cached_sandbox(refresh=refresh),
+        "rasteriser": _cached_rasteriser(FR, refresh=refresh),
         "paths": {
             "providers": DSC.PROVIDERS_JSON,
             "registry": DSC.MODEL_REGISTRY_JSON,
@@ -1367,26 +1367,28 @@ def key_status():
 
 # -- cached machine facts ---------------------------------------------------
 # `describe()` asks docker (a subprocess, up to 8s) and `rasteriser_status
-# (probe=True)` rasterises a test PNG (seconds on a cold run). BOTH are
-# constants for the lifetime of the server process: the Docker daemon does not
-# toggle while the dashboard is open, and the rasteriser does not install
-# itself. Computing them on every `/api/system` call is what made the Overview
-# tab take seconds to load, and the page renders nothing until that call
-# returns. Cache once, per server.
+# (probe=True)` rasterises a test PNG (seconds on a cold run). BOTH would be
+# repeated on every `/api/system` call, which is what made the Overview tab
+# take seconds -- so they are cached once, per server.
+#
+# The cache is NOT truly constant: Docker Desktop can be started or stopped
+# while the dashboard is open, and the System tab's whole purpose is to report
+# what is true NOW. So `/api/system?refresh=1` recomputes both (the System
+# tab's "Reload system data" button) while ordinary polls keep the fast path.
 _SANDBOX_CACHE = None
 _RASTER_CACHE = None
 
 
-def _cached_sandbox():
+def _cached_sandbox(refresh=False):
     global _SANDBOX_CACHE
-    if _SANDBOX_CACHE is None:
+    if refresh or _SANDBOX_CACHE is None:
         _SANDBOX_CACHE = SBX.describe()
     return _SANDBOX_CACHE
 
 
-def _cached_rasteriser(FR):
+def _cached_rasteriser(FR, refresh=False):
     global _RASTER_CACHE
-    if _RASTER_CACHE is None:
+    if refresh or _RASTER_CACHE is None:
         _RASTER_CACHE = FR.rasteriser_status(probe=True)
     return _RASTER_CACHE
 
@@ -1430,7 +1432,8 @@ class _Handler(BaseHTTPRequestHandler):
                     "test_mode": bool(SET.read().get("test_mode")),
                 }))
             elif path == "/api/system":
-                self._json(_system(self.results_dir))
+                self._json(_system(self.results_dir,
+                                   refresh=(q.get("refresh") == "1")))
             elif path == "/api/runs":
                 self._json(list_runs(self.results_dir, mode=_mode_arg(q)))
             elif path == "/api/analytics":
