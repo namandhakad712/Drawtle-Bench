@@ -73,6 +73,10 @@ def _token_split(records):
     return pin, pout, source
 
 
+def _legacy_records(records):
+    return [r for r in records if "total_tokens" not in r]
+
+
 def rescale_input(pin, pout, records, ratio=CHAR_PER_TOKEN):
     """Split a legacy input total into plausible input/output halves.
 
@@ -83,21 +87,31 @@ def rescale_input(pin, pout, records, ratio=CHAR_PER_TOKEN):
     `output_tokens: 0` for a run that plainly produced output, which is a
     worse lie than a labelled approximation.
 
+    The split applies PER LEGACY RECORD, not to the log as a whole. `pin`
+    already holds every legacy total attributed to input (see `_token_split`),
+    so the move is `pin - est_out, pout + est_out`. Working per-record matters
+    on a MIXED log: one modern record with a few output tokens must not
+    satisfy the guard and skip the split for every legacy record in the file,
+    or the input side keeps the whole legacy total and the output share is
+    silently lost.
+
     Returns (input, output). No-op when there is no legacy total to split.
     """
-    if not pin or pout:
+    legacy = _legacy_records(records)
+    if not legacy or not pin:
         return pin, pout
     chars = 0
-    for r in records:
-        if "total_tokens" in r:
-            continue
+    for r in legacy:
         txt = r.get("raw_model_text") or ""
         chars += len(txt)
     est_out = int(round(chars / ratio)) if chars else 0
     # Never invert the two: a run whose prose estimate exceeds its total is
-    # clamped to half, which is the neutral answer.
-    est_out = max(0, min(est_out, pin // 2))
-    return pin - est_out, est_out
+    # clamped to half, which is the neutral answer. Clamp against the legacy
+    # input total only -- the modern records' output is real and is not ours
+    # to move.
+    legacy_in = sum(r.get("prompt_tokens", 0) or 0 for r in legacy)
+    est_out = max(0, min(est_out, legacy_in // 2))
+    return pin - est_out, pout + est_out
 
 
 def bootstrap_ci(values, n=2000, seed=0, alpha=0.05):
