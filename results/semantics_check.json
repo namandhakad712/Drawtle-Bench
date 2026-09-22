@@ -13,5 +13,10 @@
     "n": 565,
     "of": 924,
     "rate": 0.6115
+  },
+  "relabelled_vs_unrotated": {
+    "n": 550,
+    "of": 924,
+    "rate": 0.5952
   }
 }
