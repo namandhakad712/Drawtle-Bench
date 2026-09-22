@@ -363,6 +363,11 @@ pre.log{
   .lb-axis{grid-template-columns:24px minmax(110px,1fr) 1fr auto}
 }
 
+/* ---------- complexity vs performance chart ---------- */
+.cx-legend{display:flex; gap:14px; align-items:center; margin-top:7px; font-size:11px; color:var(--muted); flex-wrap:wrap}
+.cx-legend i{display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px}
+.cx-legend .tiny{margin-left:auto}
+
 /* ---------- storyboard ---------- */
 .sb-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(252px,1fr)); gap:14px}
 .sb-card{
