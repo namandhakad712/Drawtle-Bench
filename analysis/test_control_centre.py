@@ -234,6 +234,29 @@ def main():
         check("system reports isolation honestly",
               sysd["sandbox"]["level"] in ("none", "docker"), str(sysd["sandbox"]["level"]))
 
+        # The machine-fact cache is per-process, but Docker does toggle while
+        # the dashboard is open. `?refresh=1` must recompute rather than return
+        # the seeded value -- the System tab's reload button is only honest if
+        # a re-read is actually a re-read.
+        _before = S._cached_sandbox()
+        with mock.patch("drawtle.sandbox.describe") as _d:
+            _d.return_value = {"level": "docker", "in_container": True,
+                               "docker_available": True,
+                               "docker_detail": "mocked up", "filesystem_isolated": True,
+                               "network_isolated": True, "spec": "docker/sandbox.md",
+                               "note": "mocked"}
+            st, sysd2 = req("/api/system?refresh=1")
+            check("system refresh recomputes the sandbox facts",
+                  st == 200 and sysd2.get("sandbox", {}).get("docker_available") is True
+                  and _d.called,
+                  str((st, sysd2.get("sandbox", {}))))
+        check("the cache itself was updated by the refresh",
+              S._cached_sandbox().get("docker_available") is True,
+              str(S._cached_sandbox()))
+        # Restore the real probe result for the rest of the suite (it is only
+        # cached, not a live daemon state -- the daemon may actually be down).
+        S._SANDBOX_CACHE = None
+
         st, runs = req("/api/runs")
         check("GET /api/runs", st == 200 and "runs" in runs, str(st))
         # ---- M5: thumb route (storyboard frames + lightbox source) ----

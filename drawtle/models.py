@@ -398,7 +398,16 @@ class ModelBackend:
     # SDK path or the urllib path.
 
     def _sdk_client(self, url):
-        """An OpenAI-compatible client for `url`, cached per URL. None if no SDK."""
+        """An OpenAI-compatible client for `url`, cached per URL. None if no SDK.
+
+        `url` is the FULL chat-completions endpoint (providers.json stores
+        `https://host/v1/chat/completions`), but the SDK treats its `base_url`
+        as the origin+prefix and appends `/chat/completions` itself -- passing
+        the full URL made every SDK call hit `.../chat/completions/chat/
+        completions`, which is a plain 404 from every provider. The SDK base is
+        therefore the endpoint without that suffix; the urllib path below
+        continues to use the full URL unmodified.
+        """
         cache = getattr(self, "_sdk_clients", None)
         if cache is None:
             cache = {}
@@ -415,7 +424,9 @@ class ModelBackend:
                     f"transport for {self.name} (pip install -r "
                     f"requirements.txt for the supported path)\n")
             return None
-        client = OpenAI(base_url=url, api_key=self.api_key or "none",
+        suffix = "/chat/completions"
+        sdk_base = url[:-len(suffix)] if url.endswith(suffix) else url
+        client = OpenAI(base_url=sdk_base, api_key=self.api_key or "none",
                         timeout=self.timeout_s, max_retries=0)
         cache[url] = client
         return client

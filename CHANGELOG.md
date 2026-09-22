@@ -1,5 +1,40 @@
 # Changelog
 
+## v2.11.0 — SDK requests hit the right URL; System facts can be re-read
+
+Two operator-session defects, both found from the control centre:
+
+### SDK transport doubled the endpoint path (every provider 404'd)
+`providers.json` stores the FULL chat-completions endpoint
+(`https://host/v1/chat/completions`), and the OpenAI SDK was handed that whole
+URL as its `base_url` — the SDK then appends `/chat/completions` itself, so
+every request went to `.../v1/chat/completions/chat/completions`, which is a
+plain HTML 404 from every provider. The urllib fallback always worked (it
+posts to the URL as given), which is why a run launched inside the container
+(no SDK) succeeded while the **vision probe** on the host (SDK installed)
+failed with `HTTPError: HTTP Error 404: 404 page not found`. The SDK base is
+now the endpoint with the `/chat/completions` suffix removed; the urllib path
+is unchanged. Verified by a local capture server: the SDK now hits exactly
+`/v1/chat/completions` once.
+
+### `/api/system` cached machine facts could never refresh
+`_cached_sandbox`/`_cached_rasteriser` were seeded once per server process and
+returned forever, on the assumption that "the Docker daemon does not toggle
+while the dashboard is open". It does — Docker Desktop can be started or
+stopped mid-session, and the System tab then reported "daemon unreachable"
+alongside a Docker panel saying `yes — 29.8.0` with egress-proxy running. The
+comment was wrong and the contradiction was showing it. `/api/system?refresh=1`
+now recomputes both facts, and the System tab's "Reload system data" button
+sends it; ordinary pollers keep the fast cache.
+
+### Verification (v2.11.0)
+- `analysis/test_model_aware.py`: new check that the wire path is the endpoint
+  exactly once for both `GenericOpenAIBackend` and `OpenAIBackend` (fails with
+  the doubled path, passes now).
+- `analysis/test_control_centre.py`: 166 passed, 0 failed (refresh=1
+  recomputes from a mocked `sandbox.describe`; the cache is updated).
+- `analysis/test_dashboard_browser.py`: 44 passed, 0 failed.
+
 ## v2.10.0 — complexity vs performance: one model, harder mazes
 
 A single progress figure averages easy and hard episodes into one number, which
