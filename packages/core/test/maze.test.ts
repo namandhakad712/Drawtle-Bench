@@ -76,10 +76,10 @@ function checkStructural(
 ): void {
   expect(got.w).toBe(want.size);
   expect(got.pair).toBe(want.pair);
-  expect(cellEq(got.entry, want.entry)).toBeTrue(`${at}: entry`);
+  expect(cellEq(got.entry, want.entry), `${at}: entry`).toBeTrue();
   expect(got.exits.length).toBe(want.exits.length);
   for (let i = 0; i < want.exits.length; i++) {
-    expect(cellEq(got.exits[i], want.exits[i])).toBeTrue(`${at}: exit ${i}`);
+    expect(cellEq(got.exits[i], want.exits[i]), `${at}: exit ${i}`).toBeTrue();
   }
   expect(initialHeading(got)).toBe(want.initial_heading);
 
@@ -112,9 +112,7 @@ function checkStructural(
     expect(trace[i][0]).toBe(want.solve[i][0]);
     expect(trace[i][1]).toBe(want.solve[i][1]);
   }
-  expect(cellEq(final[0], want.solve_final_cell)).toBeTrue(
-    `${at}: solve final cell`
-  );
+  expect(cellEq(final[0], want.solve_final_cell), `${at}: solve final cell`).toBeTrue();
 
   const walls = got
     .wallSegments()

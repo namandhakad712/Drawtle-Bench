@@ -167,6 +167,24 @@ export class PyRandom {
   }
 }
 
+/**
+ * CPython 3.12+ `sum()` over floats: Neumaier compensated summation.
+ * Naive left-to-right addition differs in the last ulp on long lists (the
+ * agnes run's mean latency proved it), so every float sum that v2 computed
+ * with builtin sum() runs through this.
+ */
+export function pySum(xs: readonly number[]): number {
+  let sum = 0;
+  let c = 0;
+  for (const x of xs) {
+    const t = sum + x;
+    if (Math.abs(sum) >= Math.abs(x)) c += (sum - t) + x;
+    else c += (x - t) + sum;
+    sum = t;
+  }
+  return sum + c;
+}
+
 // ------------------------------------------------------- number text ----
 
 /** Exact binary decomposition: |x| = m * 2^e, m integral (BigInt). */

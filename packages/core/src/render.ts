@@ -135,10 +135,11 @@ function quad(
 ): Quad | null {
   const pts = corners.map((c) => cam.project(c));
   if (pts.some((p) => p === null)) return null;
+  const ok = pts as Array<readonly [number, number, number]>;
   let depth = 0;
-  for (const p of pts) depth += p[2];
-  depth /= pts.length;
-  const d = pts.map((p) => `${pyFixed1(p[0])},${pyFixed1(p[1])}`).join(" ");
+  for (const p of ok) depth += p[2];
+  depth /= ok.length;
+  const d = ok.map((p) => `${pyFixed1(p[0])},${pyFixed1(p[1])}`).join(" ");
   return {
     depth,
     svg: `<polygon points="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${pyFloatStr(sw)}" stroke-linejoin="round"/>`,

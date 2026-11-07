@@ -119,7 +119,8 @@ function scalar(x: J): string {
     // floats: Python repr — our manifests carry only ints, but be exact.
     return x.toString();
   }
-  return escStr(x);
+  if (typeof x === "string") return escStr(x);
+  throw new Error("non-scalar reached scalar()");
 }
 
 function isPlainObject(x: J): x is { [k: string]: J } {

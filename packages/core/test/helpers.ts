@@ -23,7 +23,7 @@ import { expect } from "bun:test";
 
 export function expectDeepEqual(actual: unknown, expected: unknown, at = ""): void {
   if (Array.isArray(expected)) {
-    expect(Array.isArray(actual)).toBeTrue();
+    expect(Array.isArray(actual), `${at}: not an array`).toBeTrue();
     expect((actual as unknown[]).length).toBe(expected.length);
     for (let i = 0; i < expected.length; i++) {
       expectDeepEqual((actual as unknown[])[i], expected[i], `${at}[${i}]`);
@@ -31,23 +31,59 @@ export function expectDeepEqual(actual: unknown, expected: unknown, at = ""): vo
     return;
   }
   if (expected !== null && typeof expected === "object") {
-    expect(actual).not.toBeNull();
+    expect(actual, `${at}: not an object`).not.toBeNull();
     expect(typeof actual).toBe("object");
-    expect(Array.isArray(actual)).toBeFalse();
+    expect(Array.isArray(actual), `${at}: expected object`).toBeFalse();
     const ea = actual as Record<string, unknown>;
     for (const k of Object.keys(expected as Record<string, unknown>)) {
-      expect(k in ea).toBeTrue(`${at}: missing key ${k}`);
+      expect(k in ea, `${at}: missing key ${k}`).toBeTrue();
       expectDeepEqual(ea[k], (expected as Record<string, unknown>)[k], `${at}.${k}`);
     }
     for (const k of Object.keys(ea)) {
-      expect(k in (expected as Record<string, unknown>)).toBeTrue(
+      expect(
+        k in (expected as Record<string, unknown>),
         `${at}: extra key ${k}`
-      );
+      ).toBeTrue();
     }
     return;
   }
   if (typeof expected === "number" && typeof actual === "number") {
     expect(actual).toBe(expected); // bit-exact; 1 === 1.0 in ECMAScript
+    return;
+  }
+  expect(actual).toBe(expected);
+}
+
+/**
+ * Parity semantics for ports: every key the REFERENCE (v2) produced must be
+ * reproduced bit-exactly. The port may ADD keys (v3 extras); those are not
+ * compared.
+ */
+export function expectSupersetEqual(
+  actual: unknown,
+  expected: unknown,
+  at = ""
+): void {
+  if (Array.isArray(expected)) {
+    expect(Array.isArray(actual), `${at}: not an array`).toBeTrue();
+    expect((actual as unknown[]).length).toBe(expected.length);
+    for (let i = 0; i < expected.length; i++) {
+      expectSupersetEqual((actual as unknown[])[i], expected[i], `${at}[${i}]`);
+    }
+    return;
+  }
+  if (expected !== null && typeof expected === "object") {
+    expect(actual, `${at}: not an object`).not.toBeNull();
+    expect(typeof actual, `${at}: not object type`).toBe("object");
+    const ea = actual as Record<string, unknown>;
+    for (const k of Object.keys(expected as Record<string, unknown>)) {
+      expect(k in ea, `${at}: missing key ${k}`).toBeTrue();
+      expectSupersetEqual(ea[k], (expected as Record<string, unknown>)[k], `${at}.${k}`);
+    }
+    return;
+  }
+  if (typeof expected === "number" && typeof actual === "number") {
+    expect(actual).toBe(expected);
     return;
   }
   expect(actual).toBe(expected);
