@@ -4,7 +4,7 @@
  * every run records the isolation facts it actually had.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 
 export interface SandboxFacts {
   sandbox: string;

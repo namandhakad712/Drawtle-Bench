@@ -15,12 +15,8 @@
  * request) — resume, replay, and re-scoring become free and identical.
  */
 
-import {
-  SYS_PROMPT_TEXT,
-  SYS_PROMPT_VISION,
-  dirName,
-} from "@drawtle/core";
-import { pyDumps, type Json } from "@drawtle/core";
+import { SYS_PROMPT_TEXT, SYS_PROMPT_VISION, dirName } from "@drawtle/core";
+import { type Json, pyDumps } from "@drawtle/core";
 import {
   effortSupported,
   estimateRequestTokens,
@@ -92,7 +88,7 @@ function resolveUsage(
   promptText: string,
   completionText: string,
   inKeys: string[] = ["prompt_tokens", "input_tokens"],
-  outKeys: string[] = ["completion_tokens", "output_tokens"]
+  outKeys: string[] = ["completion_tokens", "output_tokens"],
 ): { pin: number; pout: number; source: "measured" | "estimated" } {
   const u = usage ?? {};
   let pin: number | null = null;
@@ -117,9 +113,10 @@ function resolveUsage(
   return { pin, pout, source: "estimated" };
 }
 
-function usageDetails(
-  usage: Record<string, unknown> | null | undefined
-): { cached: number; reasoning: number } {
+function usageDetails(usage: Record<string, unknown> | null | undefined): {
+  cached: number;
+  reasoning: number;
+} {
   const u = usage ?? {};
   const ptd = (u.prompt_tokens_details ?? {}) as Record<string, unknown>;
   const ctd = (u.completion_tokens_details ?? {}) as Record<string, unknown>;
@@ -153,7 +150,7 @@ export class HttpStatusError extends Error {
   constructor(
     public status: number,
     public retryAfter: string | null,
-    public bodyText: string
+    public bodyText: string,
   ) {
     super(`HTTP ${status}`);
   }
@@ -209,7 +206,7 @@ export abstract class ModelBackend {
       timeoutS?: number;
       maxRetries?: number;
       effort?: string | null;
-    } = {}
+    } = {},
   ) {
     this.model = model;
     if (opts.apiKey === undefined || opts.apiKey === null) {
@@ -251,12 +248,12 @@ export abstract class ModelBackend {
     [this.effortField, this.effortLevels] = effortSupported(this.name, model);
     if (this.effort && !this.effortField) {
       console.error(
-        `note: ${this.name}/${model} accepts no reasoning-effort control; ignoring effort='${this.effort}'`
+        `note: ${this.name}/${model} accepts no reasoning-effort control; ignoring effort='${this.effort}'`,
       );
       this.effort = null;
     } else if (this.effort && !this.effortLevels.includes(this.effort)) {
       throw new Error(
-        `${model} accepts reasoning effort in [${this.effortLevels.join(", ")}], not '${this.effort}'`
+        `${model} accepts reasoning effort in [${this.effortLevels.join(", ")}], not '${this.effort}'`,
       );
     }
   }
@@ -281,7 +278,7 @@ export abstract class ModelBackend {
       throw new Error(
         `backend '${this.name}' needs an API key and none is set.\n` +
           `  looked for: ${this.keyEnv.join(", ")}\n` +
-          `  set one, or store it once:  drawtle key set ${this.name}`
+          `  set one, or store it once:  drawtle key set ${this.name}`,
       );
     }
   }
@@ -299,10 +296,7 @@ export abstract class ModelBackend {
   }
 
   /** Call the model with retries. Returns ModelResponse. */
-  async complete(
-    messages: Message[],
-    opts: CompleteOpts = {}
-  ): Promise<ModelResponse> {
+  async complete(messages: Message[], opts: CompleteOpts = {}): Promise<ModelResponse> {
     const temperature = opts.temperature ?? 0.0;
     const maxTokens = opts.maxTokens ?? 256;
     // The mock is free and deterministic; caching it is pointless bloat.
@@ -343,8 +337,7 @@ export abstract class ModelBackend {
         if (e instanceof HttpStatusError) {
           if (e.status === 429 || e.status >= 500) {
             const ra = e.retryAfter;
-            const wait =
-              ra && /^\d+$/.test(ra) ? Number(ra) : 2 ** attempt;
+            const wait = ra && /^\d+$/.test(ra) ? Number(ra) : 2 ** attempt;
             if (attempt < this.maxRetries) {
               await sleep(Math.min(wait, 30) * 1000);
               continue;
@@ -374,7 +367,7 @@ export abstract class ModelBackend {
 
   protected async postWithDeadline(
     messages: Message[],
-    opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> }
+    opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
   ): Promise<Record<string, unknown>> {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.timeoutS * 1000);
@@ -388,19 +381,16 @@ export abstract class ModelBackend {
   protected abstract post(
     messages: Message[],
     opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
-    signal: AbortSignal
+    signal: AbortSignal,
   ): Promise<Record<string, unknown>>;
 
-  protected abstract wrap(
-    payload: Record<string, unknown>,
-    latencyS: number
-  ): ModelResponse;
+  protected abstract wrap(payload: Record<string, unknown>, latencyS: number): ModelResponse;
 
   protected openAiCompatPost(
     url: string,
     messages: Message[],
     opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
-    signal: AbortSignal
+    signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
     const body: Record<string, unknown> = {
       model: this.model,
@@ -421,10 +411,7 @@ export abstract class ModelBackend {
   }
 }
 
-async function fetchJson(
-  url: string,
-  init: RequestInit
-): Promise<Record<string, unknown>> {
+async function fetchJson(url: string, init: RequestInit): Promise<Record<string, unknown>> {
   let res: Response;
   try {
     res = await fetch(url, init);
@@ -434,11 +421,7 @@ async function fetchJson(
   const text = await res.text();
   if (!res.ok) {
     if (res.status >= 500 || res.status === 429) {
-      throw new HttpStatusError(
-        res.status,
-        res.headers.get("retry-after"),
-        text.slice(0, 300)
-      );
+      throw new HttpStatusError(res.status, res.headers.get("retry-after"), text.slice(0, 300));
     }
     throw new HttpStatusError(res.status, null, text.slice(0, 300));
   }
@@ -472,7 +455,7 @@ export class MockBackend extends ModelBackend {
       mode?: "optimal" | "stale";
       lag?: number;
       seed?: number;
-    } = {}
+    } = {},
   ) {
     super(model, {});
     this.mode = (opts.mode ?? "optimal") as "optimal" | "stale";
@@ -481,7 +464,7 @@ export class MockBackend extends ModelBackend {
 
   protected async post(
     messages: Message[],
-    opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> }
+    _opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
   ): Promise<Record<string, unknown>> {
     // The policy stamps the observation as JSON in the last user message.
     let last: string;
@@ -491,7 +474,11 @@ export class MockBackend extends ModelBackend {
     } else {
       last = rawLast
         .filter((p) => typeof p === "object" && p !== null)
-        .map((p) => (typeof (p as Record<string, unknown>).text === "string" ? (p as Record<string, unknown>).text as string : ""))
+        .map((p) =>
+          typeof (p as Record<string, unknown>).text === "string"
+            ? ((p as Record<string, unknown>).text as string)
+            : "",
+        )
         .join(" ");
     }
     let obs: Record<string, unknown> = {};
@@ -526,10 +513,7 @@ export class MockBackend extends ModelBackend {
     };
   }
 
-  protected wrap(
-    payload: Record<string, unknown>,
-    latencyS: number
-  ): ModelResponse {
+  protected wrap(payload: Record<string, unknown>, latencyS: number): ModelResponse {
     const choices = (payload.choices ?? []) as Array<Record<string, unknown>>;
     const msg = choices[0]?.message as { content?: unknown } | undefined;
     const ch = String(msg?.content ?? "");
@@ -560,44 +544,38 @@ export class OpenAIBackend extends ModelBackend {
   static BASE = "https://api.openai.com/v1/chat/completions";
   keyEnv = ["OPENAI_API_KEY"];
 
-  constructor(model = "gpt-4o", opts: ConstructorParameters<typeof ModelBackend>[1] & { apiKey?: string | null } = {}) {
+  constructor(
+    model = "gpt-4o",
+    opts: ConstructorParameters<typeof ModelBackend>[1] & { apiKey?: string | null } = {},
+  ) {
     super(model, opts);
   }
 
   protected async post(
     messages: Message[],
     opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
-    signal: AbortSignal
+    signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
     const spec = providerSpec(this.name);
     const extra: Record<string, unknown> = { ...opts.extra };
     Object.assign(extra, spec?.request_params ?? {});
     if (spec?.json_mode) extra.response_format = { type: "json_object" };
-    return this.openAiCompatPost(
-      OpenAIBackend.BASE,
-      messages,
-      { ...opts, extra },
-      signal
-    );
+    return this.openAiCompatPost(OpenAIBackend.BASE, messages, { ...opts, extra }, signal);
   }
 
-  protected wrap(
-    payload: Record<string, unknown>,
-    latencyS: number
-  ): ModelResponse {
+  protected wrap(payload: Record<string, unknown>, latencyS: number): ModelResponse {
     const choices = payload.choices as Array<Record<string, unknown>> | undefined;
     const msg = choices?.[0]?.message as { content?: unknown } | undefined;
     const ch = String(msg?.content ?? "");
     const { pin, pout, source } = resolveUsage(
       payload.usage as Record<string, unknown> | undefined,
       this.lastPromptText,
-      ch
+      ch,
     );
     const { cached, reasoning } = usageDetails(payload.usage as Record<string, unknown>);
     const c = this.cost(pin, pout);
     const msgFull = (msg ?? {}) as Record<string, unknown>;
-    const reasoningText =
-      String(msgFull.reasoning_content ?? msgFull.reasoning ?? "") || "";
+    const reasoningText = String(msgFull.reasoning_content ?? msgFull.reasoning ?? "") || "";
     return makeResponse({
       text: ch,
       promptTokens: pin,
@@ -619,14 +597,17 @@ export class AnthropicBackend extends ModelBackend {
   static BASE = "https://api.anthropic.com/v1/messages";
   keyEnv = ["ANTHROPIC_API_KEY"];
 
-  constructor(model = "claude-3-5-sonnet", opts: ConstructorParameters<typeof ModelBackend>[1] & { apiKey?: string | null } = {}) {
+  constructor(
+    model = "claude-3-5-sonnet",
+    opts: ConstructorParameters<typeof ModelBackend>[1] & { apiKey?: string | null } = {},
+  ) {
     super(model, opts);
   }
 
   protected async post(
     messages: Message[],
     opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
-    signal: AbortSignal
+    signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
     let sysText = "";
     const turns: Message[] = [];
@@ -641,10 +622,7 @@ export class AnthropicBackend extends ModelBackend {
       system: sysText.trim(),
       messages: turns.map((t) => ({
         role: t.role,
-        content:
-          typeof t.content === "string"
-            ? [{ type: "text", text: t.content }]
-            : t.content,
+        content: typeof t.content === "string" ? [{ type: "text", text: t.content }] : t.content,
       })),
       ...opts.extra,
     };
@@ -661,10 +639,7 @@ export class AnthropicBackend extends ModelBackend {
     });
   }
 
-  protected wrap(
-    payload: Record<string, unknown>,
-    latencyS: number
-  ): ModelResponse {
+  protected wrap(payload: Record<string, unknown>, latencyS: number): ModelResponse {
     const blocks = (payload.content ?? []) as Array<Record<string, unknown>>;
     const txt = blocks
       .filter((b) => typeof b === "object")
@@ -679,7 +654,7 @@ export class AnthropicBackend extends ModelBackend {
       this.lastPromptText,
       txt,
       ["input_tokens", "prompt_tokens"],
-      ["output_tokens", "completion_tokens"]
+      ["output_tokens", "completion_tokens"],
     );
     const { cached, reasoning: rtok } = usageDetails(payload.usage as Record<string, unknown>);
     const c = this.cost(pin, pout);
@@ -704,7 +679,10 @@ export class GeminiBackend extends OpenAIBackend {
   static GBASE = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
   keyEnv = ["GEMINI_API_KEY", "GOOGLE_API_KEY"];
 
-  constructor(model = "gemini-2.5-flash", opts: ConstructorParameters<typeof ModelBackend>[1] & { apiKey?: string | null } = {}) {
+  constructor(
+    model = "gemini-2.5-flash",
+    opts: ConstructorParameters<typeof ModelBackend>[1] & { apiKey?: string | null } = {},
+  ) {
     super(model, opts);
     if (!this.apiKey) {
       this.apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null;
@@ -714,7 +692,7 @@ export class GeminiBackend extends OpenAIBackend {
   protected async post(
     messages: Message[],
     opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
-    signal: AbortSignal
+    signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
     const spec = providerSpec(this.name);
     const extra: Record<string, unknown> = { ...opts.extra };
@@ -739,13 +717,13 @@ export class GenericOpenAIBackend extends OpenAIBackend {
     opts: ConstructorParameters<typeof ModelBackend>[1] & {
       apiKey?: string | null;
       timeoutS?: number;
-    } = {}
+    } = {},
   ) {
     const spec = providerSpec(provider);
     if (!spec) throw new Error(`unknown provider '${provider}'`);
     if (spec.protocol !== "openai" && spec.protocol !== "mock") {
       throw new Error(
-        `provider '${provider}' speaks '${spec.protocol}', which the generic OpenAI transport cannot drive`
+        `provider '${provider}' speaks '${spec.protocol}', which the generic OpenAI transport cannot drive`,
       );
     }
     super(model, { ...opts, timeoutS: opts.timeoutS ?? spec.timeout_s ?? 60 });
@@ -762,7 +740,10 @@ export class GenericOpenAIBackend extends OpenAIBackend {
     const uf = spec.usage_fields;
     this.usageKeys = uf
       ? [uf[0], uf[1]]
-      : [["prompt_tokens", "input_tokens"], ["completion_tokens", "output_tokens"]];
+      : [
+          ["prompt_tokens", "input_tokens"],
+          ["completion_tokens", "output_tokens"],
+        ];
   }
 
   override requireKey(): void {
@@ -770,7 +751,7 @@ export class GenericOpenAIBackend extends OpenAIBackend {
       throw new Error(
         `provider '${this.name}' needs an API key and none is set.\n` +
           `  looked for: ${this.keyEnv.join(", ")}\n` +
-          `  set one, or store it once:  drawtle key set ${this.name}`
+          `  set one, or store it once:  drawtle key set ${this.name}`,
       );
     }
   }
@@ -778,7 +759,7 @@ export class GenericOpenAIBackend extends OpenAIBackend {
   protected override async post(
     messages: Message[],
     opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
-    signal: AbortSignal
+    signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
     if (!this.url) {
       throw new Error(`provider '${this.name}' has no endpoint in providers.json`);
@@ -789,16 +770,11 @@ export class GenericOpenAIBackend extends OpenAIBackend {
     return this.openAiCompatPost(this.url, messages, { ...opts, extra }, signal);
   }
 
-  protected override wrap(
-    payload: Record<string, unknown>,
-    latencyS: number
-  ): ModelResponse {
+  protected override wrap(payload: Record<string, unknown>, latencyS: number): ModelResponse {
     const choices = (payload.choices ?? []) as Array<Record<string, unknown>>;
     if (!choices.length) {
       const err = payload.error ?? payload;
-      throw new Error(
-        `${this.name} returned no choices (${pyDumps(err as Json).slice(0, 300)})`
-      );
+      throw new Error(`${this.name} returned no choices (${pyDumps(err as Json).slice(0, 300)})`);
     }
     const msg = (choices[0].message ?? {}) as Record<string, unknown>;
     let ch = msg.content ?? "";
@@ -819,7 +795,7 @@ export class GenericOpenAIBackend extends OpenAIBackend {
       this.lastPromptText,
       String(ch),
       this.usageKeys[0],
-      this.usageKeys[1]
+      this.usageKeys[1],
     );
     const { cached, reasoning: rtok } = usageDetails(payload.usage as Record<string, unknown>);
     const c = this.cost(pin, pout);
@@ -842,13 +818,15 @@ export class GenericOpenAIBackend extends OpenAIBackend {
 // ---------------------------------------------------------------- factory --
 
 export function knownBackends(): string[] {
-  return Array.from(new Set(["mock", "openai", "anthropic", "gemini", ...Object.keys(providers())])).sort();
+  return Array.from(
+    new Set(["mock", "openai", "anthropic", "gemini", ...Object.keys(providers())]),
+  ).sort();
 }
 
 export function makeBackend(
   kind: string,
   model: string,
-  opts: Record<string, unknown> = {}
+  opts: Record<string, unknown> = {},
 ): ModelBackend {
   if (kind === "mock") return new MockBackend(model, opts as never);
   if (kind === "openai") return new OpenAIBackend(model, opts as never);

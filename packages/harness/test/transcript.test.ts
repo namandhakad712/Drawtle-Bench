@@ -1,12 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { loadJson, expectDeepEqual } from "../../core/test/helpers";
-import {
-  TranscriptPool,
-  contentKey,
-  loadPool,
-  savePool,
-  poolPath,
-} from "../src/transcript";
+import { expectDeepEqual, loadJson } from "../../core/test/helpers";
+import { TranscriptPool, contentKey, loadPool, poolPath, savePool } from "../src/transcript";
 
 const fix = loadJson<{
   keys: string[];
@@ -21,7 +15,7 @@ const fix = loadJson<{
   encoding: number;
 }>("transcript.json");
 
-const img = {
+const _img = {
   type: "image_url",
   image_url: { url: "data:image/png;base64,QUJD" },
 };
@@ -38,9 +32,7 @@ describe("transcript pool parity (hashes, byte counts, blob format)", () => {
   });
 
   test("content_key is pyCanonicalDumps-based", () => {
-    expect(contentKey("plain string")).toBe(
-      contentKey("plain string")
-    );
+    expect(contentKey("plain string")).toBe(contentKey("plain string"));
     expect(contentKey("café ☃")).not.toBe(contentKey("cafe"));
   });
 
@@ -61,8 +53,8 @@ describe("transcript pool parity (hashes, byte counts, blob format)", () => {
               content: "TAMPERED",
             },
           },
-        })
-      ) as never
+        }),
+      ) as never,
     );
     expect(() => tampered.replayTranscript(0)).toThrow(/corrupt/i);
   });
@@ -74,11 +66,7 @@ describe("transcript pool parity (hashes, byte counts, blob format)", () => {
     savePool(dir, "rt-1", p);
     const loaded = loadPool(dir, "rt-1");
     expect(loaded).not.toBeNull();
-    expectDeepEqual(
-      loaded!.replayTranscript(0),
-      fix.replay0,
-      "roundtrip"
-    );
+    expectDeepEqual(loaded!.replayTranscript(0), fix.replay0, "roundtrip");
     expect(typeof poolPath(dir, "rt-1")).toBe("string");
   });
 });
@@ -89,7 +77,7 @@ function joinScratch(name: string): string {
   const d = nodePath.join(
     nodePath.dirname(nodePath.dirname(nodePath.dirname(import.meta.dir))),
     ".scratch",
-    name
+    name,
   );
   nodeFs.rmSync(d, { recursive: true, force: true });
   nodeFs.mkdirSync(d, { recursive: true });

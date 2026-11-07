@@ -10,8 +10,8 @@
  */
 
 import * as nodeFs from "node:fs";
-import * as nodePath from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import * as nodePath from "node:path";
 
 export const REPO_ROOT = nodePath.resolve(import.meta.dir, "../../..");
 export const REGISTRY_DIR = nodePath.join(REPO_ROOT, "registry");
@@ -163,10 +163,7 @@ const EFFORT_FIELD: Record<string, string> = {
   gemini: "reasoning_effort",
 };
 
-export function effortSupported(
-  backend: string,
-  model: string
-): [string | null, string[]] {
+export function effortSupported(backend: string, model: string): [string | null, string[]] {
   if (!(backend === "openai" || backend === "gemini")) return [null, []];
   const levels = modelInfo(model).reasoning_effort_levels;
   if (!levels || levels.length === 0) return [null, []];
@@ -183,10 +180,7 @@ function loadDotenv(): void {
       if (!m) continue;
       if (process.env[m[1]]) continue; // never override an exported var
       let v = m[2];
-      if (
-        (v.startsWith('"') && v.endsWith('"')) ||
-        (v.startsWith("'") && v.endsWith("'"))
-      ) {
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
         v = v.slice(1, -1);
       }
       process.env[m[1]] = v;
@@ -248,7 +242,7 @@ export function clearKey(backend: string): string {
 /** Precedence: explicit argument, environment, credential file. */
 export function resolveKey(
   backend: string,
-  explicit?: string | null
+  explicit?: string | null,
 ): { key: string | null; source: string | null } {
   if (explicit) return { key: explicit, source: "argument" };
   loadDotenv();
@@ -311,7 +305,7 @@ export interface FetchModelsResult {
  *  windows are NOT on these endpoints. */
 export async function fetchModels(
   backend: string,
-  key?: string | null
+  key?: string | null,
 ): Promise<FetchModelsResult> {
   const spec = providers()[backend];
   if (!spec?.models_url) {

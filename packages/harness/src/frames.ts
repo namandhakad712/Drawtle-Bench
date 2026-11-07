@@ -37,7 +37,7 @@ export async function rasterize(svg: string, outPath: string): Promise<string> {
   const mod = await loadResvg();
   if (!mod) {
     throw new Error(
-      "No SVG->PNG rasteriser available. v3 uses @resvg/resvg-js; reinstall dependencies (bun install). Text-only and mock runs do not need this."
+      "No SVG->PNG rasteriser available. v3 uses @resvg/resvg-js; reinstall dependencies (bun install). Text-only and mock runs do not need this.",
     );
   }
   const png = new mod.Resvg(svg).render().asPng();

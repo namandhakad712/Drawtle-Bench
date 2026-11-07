@@ -1,9 +1,9 @@
 /** Runs: every run in the results tree, including unfinished and failed. */
 import { useEffect, useState } from "preact/hooks";
-import { H, Chip, Bar } from "../ui.tsx";
-import { get, fmt, type RunRow } from "../api.ts";
+import { type RunRow, fmt, get } from "../api.ts";
+import { Chip, H } from "../ui.tsx";
 
-export function Runs(props: { go: (hash: string) => void }) {
+export function Runs(_props: { go: (hash: string) => void }) {
   const [rows, setRows] = useState<RunRow[] | null>(null);
   const [filter, setFilter] = useState("");
 
@@ -18,7 +18,7 @@ export function Runs(props: { go: (hash: string) => void }) {
   const shown = (rows ?? []).filter((r) =>
     filter
       ? (r.run_id + (r.summary?.model ?? "")).toLowerCase().includes(filter.toLowerCase())
-      : true
+      : true,
   );
 
   return H`
@@ -28,13 +28,17 @@ export function Runs(props: { go: (hash: string) => void }) {
         <input type="text" placeholder="filter by run id or model…" value=${filter} onInput=${(e: Event) => setFilter((e.target as HTMLInputElement).value)} style=${{ flex: 1 }} />
         <span class="hint">${shown.length}/${rows?.length ?? 0} shown</span>
       </div>
-      ${rows === null ? H`<p class="hint">loading…</p>` : H`
+      ${
+        rows === null
+          ? H`<p class="hint">loading…</p>`
+          : H`
         <table class="tbl">
           <thead><tr>
             <th>run</th><th>model</th><th>status</th><th class="num">progress</th><th>CI</th><th class="num">turns</th><th class="num">cost</th><th>tokens in/out</th><th></th>
           </tr></thead>
           <tbody>
-            ${shown.map((r) => H`
+            ${shown.map(
+              (r) => H`
               <tr key=${r.run_id}>
                 <td class="mono" title=${r.note ?? ""}>${r.run_id}</td>
                 <td>${r.summary?.model ?? H`<span class="hint">no summary</span>`}</td>
@@ -46,11 +50,13 @@ export function Runs(props: { go: (hash: string) => void }) {
                 <td class="mono hint">${fmt.num(r.summary?.input_tokens ?? null)} / ${fmt.num(r.summary?.output_tokens ?? null)}</td>
                 <td><a href=${`#/run/${r.run_id}`}>open</a></td>
               </tr>
-            `)}
+            `,
+            )}
           </tbody>
         </table>
         ${shown.some((r) => !r.has_summary) ? H`<p class="hint">Runs without a summary are the ones a reader most needs to see — stopped or crashed. Their logs hold the turns that completed.</p>` : null}
-      `}
+      `
+      }
     </div>
   `;
 }

@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   PyRandom,
+  pyCanonicalDumps,
+  pyDumps,
   pyFixed1,
+  pyFloatStr,
   pyRound,
   pyRoundInt,
-  pyFloatStr,
-  pyDumps,
-  pyCanonicalDumps,
 } from "../src/py";
 
 describe("PyRandom (CPython random.Random parity)", () => {
@@ -117,9 +117,7 @@ describe("number formatting (CPython str/round/format parity)", () => {
 
 describe("json parity", () => {
   test("dumps default separators", () => {
-    expect(pyDumps({ turn: 0, rotation_deg: 90 })).toBe(
-      '{"turn": 0, "rotation_deg": 90}'
-    );
+    expect(pyDumps({ turn: 0, rotation_deg: 90 })).toBe('{"turn": 0, "rotation_deg": 90}');
     expect(pyDumps({ a: [1, 2], b: "x" })).toBe('{"a": [1, 2], "b": "x"}');
     expect(pyDumps({ turn: -90, step: 1 })).toBe('{"turn": -90, "step": 1}');
     expect(pyDumps([])).toBe("[]");
@@ -128,11 +126,9 @@ describe("json parity", () => {
 
   test("canonical form (sorted, tight, ascii-escaped)", () => {
     expect(pyCanonicalDumps({ b: 1, a: [2, { z: 1, y: 2 }] })).toBe(
-      '{"a":[2,{"y":2,"z":1}],"b":1}'
+      '{"a":[2,{"y":2,"z":1}],"b":1}',
     );
     expect(pyCanonicalDumps("café ☃")).toBe('"caf\\u00e9 \\u2603"');
-    expect(pyCanonicalDumps('quote " back\\slash')).toBe(
-      '"quote \\" back\\\\slash"'
-    );
+    expect(pyCanonicalDumps('quote " back\\slash')).toBe('"quote \\" back\\\\slash"');
   });
 });

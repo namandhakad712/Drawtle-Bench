@@ -15,19 +15,18 @@
 
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
-import { PyRandom, pyRound, pySum, bootstrapCi } from "@drawtle/core";
+import { PyRandom, bootstrapCi, pyRound, pySum } from "@drawtle/core";
 import {
+  SAFE_RUN_ID,
+  STATUS_SUCCESS,
+  STATUS_UNKNOWN,
+  dirPaths,
+  flatPaths,
+  inferMode,
+  modeOf,
   readJsonl,
   readStatus,
   readStatusFile,
-  runPaths,
-  STATUS_SUCCESS,
-  STATUS_UNKNOWN,
-  inferMode,
-  modeOf,
-  SAFE_RUN_ID,
-  flatPaths,
-  dirPaths,
 } from "./runstate";
 
 const CHAR_PER_TOKEN = 4.0;
@@ -96,10 +95,7 @@ function rescaleInput(pin: number, pout: number, records: Rec[]): [number, numbe
 
 // --------------------------------------------------------------- aggregate --
 
-export function aggregate(
-  jsonlPath: string,
-  meta?: Rec | null
-): Rec {
+export function aggregate(jsonlPath: string, meta?: Rec | null): Rec {
   const records = readJsonl(jsonlPath, true);
   const scored: number[] = records
     .filter((r) => r.progressed !== null && r.progressed !== undefined)
@@ -133,9 +129,8 @@ export function aggregate(
     mean_input_tokens_per_turn: pyRound(pin / nTurns, 4),
     mean_output_tokens_per_turn: pyRound(pout / nTurns, 4),
     token_source: split.source,
-    n_estimated_turns: records.filter(
-      (r) => String(r.token_source ?? "measured") !== "measured"
-    ).length,
+    n_estimated_turns: records.filter((r) => String(r.token_source ?? "measured") !== "measured")
+      .length,
     reasoning_tokens: records.reduce((a, r) => a + (Number(r.reasoning_tokens ?? 0) || 0), 0),
     cached_tokens: records.reduce((a, r) => a + (Number(r.cached_tokens ?? 0) || 0), 0),
     mean_tokens_per_turn: pyRound(total / nTurns, 4),
@@ -159,7 +154,7 @@ export function aggregate(
     summary.n_skipped = meta.n_skipped;
     summary.transcript = meta.transcript;
   }
-  if (meta && meta.run_id) {
+  if (meta?.run_id) {
     const outDir = nodePath.dirname(nodePath.resolve(jsonlPath));
     const stPath = nodePath.join(outDir, "status.json");
     let st: Rec;
@@ -191,7 +186,7 @@ export function aggregate(
       ? [pyRound(cluster.lo, 3), pyRound(cluster.hi, 3)]
       : [null, null];
   summary.cache_hits = records.filter(
-    (r) => (r as { from_cache?: boolean }).from_cache === true
+    (r) => (r as { from_cache?: boolean }).from_cache === true,
   ).length;
   return summary;
 }
@@ -202,7 +197,7 @@ export function aggregate(
 export function clusterBootstrap(
   records: Rec[],
   n = 2000,
-  seed: number | bigint = 0
+  seed: number | bigint = 0,
 ): { lo: number | null; hi: number | null; k: number } {
   const byEpisode = new Map<number, number[]>();
   for (const r of records) {
@@ -261,7 +256,7 @@ export function compare(
   a: { runId: string; records: Rec[] },
   b: { runId: string; records: Rec[] },
   n = 2000,
-  seed: number | bigint = 0
+  seed: number | bigint = 0,
 ): CompareVerdict {
   const rateA = progressRate(a.records);
   const rateB = progressRate(b.records);
@@ -280,9 +275,13 @@ export function compare(
   }
   const rng = new PyRandom(seed);
   let wins = 0;
-  let diffs: number[] = [];
-  const valsA = a.records.filter((r) => r.progressed !== null && r.progressed !== undefined).map((r) => (r.progressed ? 1 : 0));
-  const valsB = b.records.filter((r) => r.progressed !== null && r.progressed !== undefined).map((r) => (r.progressed ? 1 : 0));
+  const diffs: number[] = [];
+  const valsA = a.records
+    .filter((r) => r.progressed !== null && r.progressed !== undefined)
+    .map((r) => (r.progressed ? 1 : 0));
+  const valsB = b.records
+    .filter((r) => r.progressed !== null && r.progressed !== undefined)
+    .map((r) => (r.progressed ? 1 : 0));
   for (let i = 0; i < n; i++) {
     let sa = 0;
     for (let j = 0; j < valsA.length; j++) sa += rng.choice(valsA);
@@ -343,7 +342,7 @@ function effectiveStatus(record: Rec, summary: Rec | null): [string, string | nu
   if (record.status && record.status !== STATUS_UNKNOWN) {
     return [String(record.status), (record.note as string) ?? null, "status-file"];
   }
-  if (summary && summary.status) {
+  if (summary?.status) {
     return [String(summary.status), (summary.status_note as string) ?? null, "summary"];
   }
   return [STATUS_UNKNOWN, "no status file and no status in summary", "none"];
@@ -396,8 +395,7 @@ export function candidateRuns(resultsDir: string): Array<[string, Record<string,
 export function enumerateRuns(resultsDir: string): Record<string, RunEntry> {
   const out: Record<string, RunEntry> = {};
   for (const [rid, paths] of candidateRuns(resultsDir)) {
-    const layout: "dir" | "flat" =
-      nodePath.basename(paths.jsonl) === "run.jsonl" ? "dir" : "flat";
+    const layout: "dir" | "flat" = nodePath.basename(paths.jsonl) === "run.jsonl" ? "dir" : "flat";
     const rec = readStatusFile(paths.status, rid);
     let summary: Rec | null = null;
     if (nodeFs.existsSync(paths.summary)) {
@@ -468,7 +466,7 @@ export interface LeaderboardRow {
  *  beside real models; a dataset filter keeps unlike measurements apart. */
 export function leaderboard(
   resultsDir: string,
-  opts: { onlyClean?: boolean; mode?: string | null; dataset?: string | null } = {}
+  opts: { onlyClean?: boolean; mode?: string | null; dataset?: string | null } = {},
 ): LeaderboardRow[] {
   const { onlyClean = true, mode = null, dataset = null } = opts;
   const rows: LeaderboardRow[] = [];
@@ -519,7 +517,7 @@ export function excludedRuns(resultsDir: string): Array<{
 }> {
   const out = [];
   for (const [rid, run] of Object.entries(enumerateRuns(resultsDir)).sort((a, b) =>
-    a[0].localeCompare(b[0])
+    a[0].localeCompare(b[0]),
   )) {
     if (run.status === STATUS_SUCCESS) continue;
     out.push({

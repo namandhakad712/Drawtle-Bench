@@ -1,7 +1,7 @@
 /** Compare: paired bootstrap verdict between two runs. */
 import { useEffect, useState } from "preact/hooks";
-import { H, Chip } from "../ui.tsx";
-import { get, fmt } from "../api.ts";
+import { fmt, get } from "../api.ts";
+import { Chip, H } from "../ui.tsx";
 
 interface Verdict {
   a: string;
@@ -15,7 +15,11 @@ interface Verdict {
   note: string;
 }
 
-export function Compare(props: { a: string; b: string; pick: (which: "a" | "b", id: string) => void }) {
+export function Compare(props: {
+  a: string;
+  b: string;
+  pick: (which: "a" | "b", id: string) => void;
+}) {
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -23,7 +27,9 @@ export function Compare(props: { a: string; b: string; pick: (which: "a" | "b", 
     if (!props.a || !props.b) return;
     setVerdict(null);
     setErr(null);
-    get<Verdict>(`/api/v3/compare?a=${encodeURIComponent(props.a)}&b=${encodeURIComponent(props.b)}`)
+    get<Verdict>(
+      `/api/v3/compare?a=${encodeURIComponent(props.a)}&b=${encodeURIComponent(props.b)}`,
+    )
       .then(setVerdict)
       .catch((e) => setErr(String(e.message)));
   }, [props.a, props.b]);
@@ -36,7 +42,9 @@ export function Compare(props: { a: string; b: string; pick: (which: "a" | "b", 
         <div class="field"><label>run B</label><input type="text" value=${props.b} onInput=${(e: Event) => props.pick("b", (e.target as HTMLInputElement).value)} /></div>
       </div>
       ${err ? H`<p class="err">${err}</p>` : null}
-      ${verdict ? H`
+      ${
+        verdict
+          ? H`
         <table class="tbl">
           <thead><tr><th></th><th>run</th><th class="num">progress</th></tr></thead>
           <tbody>
@@ -49,7 +57,9 @@ export function Compare(props: { a: string; b: string; pick: (which: "a" | "b", 
           <span style=${{ marginLeft: "0.5rem" }}>${verdict.note}</span>
         </p>
         <p class="hint">diff ${(verdict.diff ?? 0).toFixed(4)} · p≈${verdict.pValue ?? "?"} (two-sided resampling, 2000 draws, seed 0). Overlapping CIs do not support calling a winner; this test says so out loud.</p>
-      ` : H`<p class="hint">pick two run ids (open a run and press “compare” to prefill).</p>`}
+      `
+          : H`<p class="hint">pick two run ids (open a run and press “compare” to prefill).</p>`
+      }
     </div>
   `;
 }

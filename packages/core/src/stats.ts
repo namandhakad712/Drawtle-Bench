@@ -26,7 +26,7 @@ export function bootstrapCi(
   values: Array<number | null | undefined>,
   n = 2000,
   seed: number | bigint = 0,
-  alpha = 0.05
+  alpha = 0.05,
 ): [number | null, number | null] {
   const vals = values.filter((v): v is number => v !== null && v !== undefined);
   if (vals.length < 2) {

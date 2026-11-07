@@ -1,27 +1,43 @@
 /** System: doctor, keys, settings, registry, response cache, integrity. */
 import { useEffect, useState } from "preact/hooks";
-import { H, Chip } from "../ui.tsx";
-import { get, post, fmt } from "../api.ts";
+import { get, post } from "../api.ts";
+import { Chip, H } from "../ui.tsx";
 
-interface KeyRow { backend: string; masked: string | null; source: string | null }
-interface Check { name: string; ok: boolean; detail: string }
+interface KeyRow {
+  backend: string;
+  masked: string | null;
+  source: string | null;
+}
+interface Check {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
 
 export function System() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [raster, setRaster] = useState<null | { usable: boolean; detail: string }>(null);
   const [cache, setCache] = useState<null | { entries: number; bytes: number }>(null);
-  const [integrity, setIntegrity] = useState<null | { runs: Array<{ run_id: string; mode: string; tracked: boolean; note: string }> }>(null);
+  const [integrity, setIntegrity] = useState<null | {
+    runs: Array<{ run_id: string; mode: string; tracked: boolean; note: string }>;
+  }>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [backend, setBackend] = useState("");
   const [key, setKey] = useState("");
 
   const refresh = (): void => {
     get<{ keys: KeyRow[] }>("/api/v3/keys").then((d) => setKeys(d.keys));
-    get<{ settings: Record<string, unknown> }>("/api/v3/settings").then((d) => setSettings(d.settings));
-    get<{ rasteriser: { usable: boolean; detail: string } }>("/api/v3/vision-probe").then((d) => setRaster(d.rasteriser));
+    get<{ settings: Record<string, unknown> }>("/api/v3/settings").then((d) =>
+      setSettings(d.settings),
+    );
+    get<{ rasteriser: { usable: boolean; detail: string } }>("/api/v3/vision-probe").then((d) =>
+      setRaster(d.rasteriser),
+    );
     get<{ entries: number; bytes: number }>("/api/v3/response-cache").then(setCache);
-    get<{ runs: Array<{ run_id: string; mode: string; tracked: boolean; note: string }> }>("/api/v3/integrity").then(setIntegrity);
+    get<{ runs: Array<{ run_id: string; mode: string; tracked: boolean; note: string }> }>(
+      "/api/v3/integrity",
+    ).then(setIntegrity);
   };
   useEffect(refresh, []);
 
@@ -74,12 +90,14 @@ export function System() {
         <table class="tbl">
           <thead><tr><th>backend</th><th>key</th><th>source</th><th></th></tr></thead>
           <tbody>
-            ${keys.map((k) => H`<tr key=${k.backend}>
+            ${keys.map(
+              (k) => H`<tr key=${k.backend}>
               <td>${k.backend}</td>
               <td class="mono">${k.masked ?? H`<span class="hint">(none)</span>`}</td>
               <td><${Chip} tone="muted">${k.source ?? "—"}</${Chip}></td>
               <td>${k.masked ? H`<button onClick=${() => clearKeyAction(k.backend)}>clear</button>` : null}</td>
-            </tr>`)}
+            </tr>`,
+            )}
           </tbody>
         </table>
         <div style=${{ display: "flex", gap: "0.5rem", marginTop: "0.6rem" }}>
@@ -95,18 +113,24 @@ export function System() {
 
       <div class="card" style=${{ gridColumn: "1 / -1" }}>
         <h2>Integrity <span class="sub">a live run that is not committed is at risk — this says so</span></h2>
-        ${integrity ? H`
+        ${
+          integrity
+            ? H`
           <table class="tbl">
             <thead><tr><th>run</th><th>mode</th><th>committed</th><th>note</th></tr></thead>
             <tbody>
-              ${integrity.runs.map((r) => H`<tr key=${r.run_id}>
+              ${integrity.runs.map(
+                (r) => H`<tr key=${r.run_id}>
                 <td class="mono">${r.run_id}</td>
                 <td><${Chip} tone=${r.mode === "live" ? "good" : "warn"}>${r.mode}</${Chip}></td>
                 <td>${r.tracked ? H`<${Chip} tone="good">yes</${Chip}>` : H`<${Chip} tone="bad">no</${Chip}>`}</td>
                 <td class="hint">${r.note}</td>
-              </tr>`)}
+              </tr>`,
+              )}
             </tbody>
-          </table>` : H`<p class="hint">loading…</p>`}
+          </table>`
+            : H`<p class="hint">loading…</p>`
+        }
       </div>
     </div>
   `;

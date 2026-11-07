@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
-import { pyCanonicalDumps, type Json } from "@drawtle/core";
+import { type Json, pyCanonicalDumps } from "@drawtle/core";
 import type { Message } from "./backends";
 
 export interface CacheMeta {
@@ -40,7 +40,7 @@ export function responseCacheKey(
   backend: string,
   model: string,
   messages: Message[],
-  opts: { temperature: number; maxTokens: number; extra?: Record<string, unknown> }
+  opts: { temperature: number; maxTokens: number; extra?: Record<string, unknown> },
 ): string {
   const blob = pyCanonicalDumps({
     v: 1,
@@ -76,7 +76,7 @@ export function responseCachePut(
   backend: string,
   model: string,
   payload: Record<string, unknown>,
-  latencyS: number
+  latencyS: number,
 ): void {
   const dir = cacheDir();
   const p = nodePath.join(dir, key.slice(0, 2), `${key}.json`);

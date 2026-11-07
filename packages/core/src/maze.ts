@@ -23,13 +23,12 @@ export function mod360(x: number): number {
 // N, E, S, W is the order Python's dict preserved, and the oracle breaks
 // distance ties by taking the FIRST minimal neighbour, so a different order
 // would change chosen directions on ties.
-export const DIRS: ReadonlyArray<readonly [number, readonly [number, number]]> =
-  [
-    [0, [0, -1]], // N
-    [90, [1, 0]], // E
-    [180, [0, 1]], // S
-    [270, [-1, 0]], // W
-  ];
+export const DIRS: ReadonlyArray<readonly [number, readonly [number, number]]> = [
+  [0, [0, -1]], // N
+  [90, [1, 0]], // E
+  [180, [0, 1]], // S
+  [270, [-1, 0]], // W
+];
 
 export type Cell = readonly [number, number];
 
@@ -50,11 +49,9 @@ export function isCorner(cell: Cell, w: number, h: number): boolean {
 
 export function borderCells(w: number, h: number, side: string): Cell[] {
   if (side === "N") return Array.from({ length: w }, (_, x) => [x, 0] as Cell);
-  if (side === "S")
-    return Array.from({ length: w }, (_, x) => [x, h - 1] as Cell);
+  if (side === "S") return Array.from({ length: w }, (_, x) => [x, h - 1] as Cell);
   if (side === "W") return Array.from({ length: h }, (_, y) => [0, y] as Cell);
-  if (side === "E")
-    return Array.from({ length: h }, (_, y) => [w - 1, y] as Cell);
+  if (side === "E") return Array.from({ length: h }, (_, y) => [w - 1, y] as Cell);
   throw new Error(`bad side ${side}`);
 }
 
@@ -106,8 +103,7 @@ export class Maze {
 
   cells(): Cell[] {
     const out: Cell[] = [];
-    for (let y = 0; y < this.h; y++)
-      for (let x = 0; x < this.w; x++) out.push([x, y]);
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) out.push([x, y]);
     return out;
   }
 
@@ -147,13 +143,11 @@ export class Maze {
     const openCells = new Set<string>([...this.exits, this.entry].map(cellKey));
     for (let x = 0; x < this.w; x++) {
       if (!openCells.has(cellKey([x, 0]))) segs.push([x, 0.0, x + 1.0, 0.0]);
-      if (!openCells.has(cellKey([x, this.h - 1])))
-        segs.push([x, this.h, x + 1.0, this.h]);
+      if (!openCells.has(cellKey([x, this.h - 1]))) segs.push([x, this.h, x + 1.0, this.h]);
     }
     for (let y = 0; y < this.h; y++) {
       if (!openCells.has(cellKey([0, y]))) segs.push([0.0, y, 0.0, y + 1.0]);
-      if (!openCells.has(cellKey([this.w - 1, y])))
-        segs.push([this.w, y, this.w, y + 1.0]);
+      if (!openCells.has(cellKey([this.w - 1, y]))) segs.push([this.w, y, this.w, y + 1.0]);
     }
     return segs;
   }
@@ -200,19 +194,13 @@ export function placeOpenings(m: Maze, pair: string, rng: PyRng): Maze {
   const [a, b] = EXIT_PAIRS[pair];
   const sides: Cell[][] = [];
   for (const side of [a, b]) {
-    sides.push(
-      borderCells(m.w, m.h, side).filter(
-        (c) => !isCorner(c, m.w, m.h)
-      )
-    );
+    sides.push(borderCells(m.w, m.h, side).filter((c) => !isCorner(c, m.w, m.h)));
   }
   m.exits = [rng.choice(sides[0]), rng.choice(sides[1])];
 
   const free = SIDES.filter((s) => s !== a && s !== b);
   const entrySide = rng.choice(free);
-  const cands = borderCells(m.w, m.h, entrySide).filter(
-    (c) => !isCorner(c, m.w, m.h)
-  );
+  const cands = borderCells(m.w, m.h, entrySide).filter((c) => !isCorner(c, m.w, m.h));
   m.entry = rng.choice(cands);
   return m;
 }
@@ -260,12 +248,7 @@ export type Action = readonly [number, number];
 /** The one move that shortens the path to the nearest exit, or null when the
  * turtle is already on an exit or is walled in. First minimal neighbour wins
  * (N, E, S, W order), matching v2's tie-breaking. */
-export function optimalAction(
-  m: Maze,
-  cell: Cell,
-  heading: number,
-  dist: Dist
-): Action | null {
+export function optimalAction(m: Maze, cell: Cell, heading: number, dist: Dist): Action | null {
   if (m.exits.some((e) => cellKey(e) === cellKey(cell))) return null;
   let best: [number, number] | null = null;
   for (const [nb, d] of m.neighbours(cell)) {
@@ -295,12 +278,12 @@ export function applyAction(
   m: Maze,
   cell: Cell,
   heading: number,
-  action: Action | null
+  action: Action | null,
 ): [Cell, number] {
   if (action === null) return [cell, heading];
   const [turn, steps] = action;
   let h = mod360(heading + turn);
-  h = ((pyRoundInt(h / 90.0) * 90) % 360 + 360) % 360;
+  h = (((pyRoundInt(h / 90.0) * 90) % 360) + 360) % 360;
   const dir = DIRS.find(([d]) => d === h);
   if (!dir) return [cell, heading];
   const [dx, dy] = dir[1];
@@ -317,7 +300,7 @@ export function applyAction(
 export function solve(
   m: Maze,
   startCell: Cell,
-  startHeading: number
+  startHeading: number,
 ): { trace: Action[]; final: [Cell, number] } {
   const dist = distanceField(m);
   let cell: Cell = startCell;
@@ -381,7 +364,7 @@ function _rotateWallsImpl(m: Maze, deg: number, keepOpenings: boolean): Maze {
     [...m.blocked].map((k) => {
       const [a, b] = parseEdge(k);
       return edgeKey(rot(a), rot(b));
-    })
+    }),
   );
   out.pair = m.pair;
   if (keepOpenings) {
@@ -392,9 +375,7 @@ function _rotateWallsImpl(m: Maze, deg: number, keepOpenings: boolean): Maze {
     let entry = rot(m.entry);
     if (out.exits.some((e) => cellKey(e) === cellKey(entry))) {
       const free = [...borderCells(n, n, "N"), ...borderCells(n, n, "S")].filter(
-        (c) =>
-          !out.exits.some((e) => cellKey(e) === cellKey(c)) &&
-          !isCorner(c, n, n)
+        (c) => !out.exits.some((e) => cellKey(e) === cellKey(c)) && !isCorner(c, n, n),
       );
       entry = free.length > 0 ? free[0] : [Math.floor(n / 2), Math.floor(n / 2)];
     }

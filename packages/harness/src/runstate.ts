@@ -31,9 +31,7 @@ export const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** The mock backend is a self-test by construction; anything else is live. */
 export function inferMode(backendName?: string): "live" | "test" {
-  return (backendName ?? "").trim().toLowerCase() === "mock"
-    ? MODE_TEST
-    : MODE_LIVE;
+  return (backendName ?? "").trim().toLowerCase() === "mock" ? MODE_TEST : MODE_LIVE;
 }
 
 type Rec = Record<string, unknown>;
@@ -41,7 +39,7 @@ type Rec = Record<string, unknown>;
 /** A run's mode, read from its own records. Returns [mode, source]. */
 export function modeOf(
   status?: Rec | null,
-  summary?: Rec | null
+  summary?: Rec | null,
 ): ["live" | "test", "recorded" | "inferred"] {
   for (const src of [status, summary]) {
     if (src && typeof src === "object" && MODES.includes(src.mode as string)) {
@@ -118,11 +116,7 @@ export function findRunDir(outDir: string, runId: string): string | null {
   return null;
 }
 
-export function runPaths(
-  outDir: string,
-  runId: string,
-  model?: string
-): Record<string, string> {
+export function runPaths(outDir: string, runId: string, model?: string): Record<string, string> {
   if (model) return dirPaths(runDir(outDir, model, runId));
   const d = findRunDir(outDir, runId);
   if (d) return dirPaths(d);
@@ -190,10 +184,7 @@ export function planMigration(outDir: string): MigrationPlanItem[] {
   return plan;
 }
 
-export function migrateFlatRuns(
-  outDir: string,
-  apply = false
-): MigrationPlanItem[] {
+export function migrateFlatRuns(outDir: string, apply = false): MigrationPlanItem[] {
   const plan = planMigration(outDir);
   if (!apply) return plan;
   for (const item of plan) {
@@ -323,11 +314,7 @@ function iso(tsSeconds: number): string {
   );
 }
 
-export function markStarted(
-  outDir: string,
-  runId: string,
-  meta: Rec
-): string {
+export function markStarted(outDir: string, runId: string, meta: Rec): string {
   const rec: Rec = { ...(meta ?? {}), run_id: runId, status: STATUS_STARTED };
   const now = Date.now() / 1000;
   rec.started_at = now;
@@ -340,7 +327,7 @@ export function markFinished(
   runId: string,
   status: string,
   extra?: Rec,
-  startedAt?: number
+  startedAt?: number,
 ): string {
   let rec = readStatus(outDir, runId);
   if (rec.status === STATUS_UNKNOWN && rec.note) {
@@ -365,7 +352,7 @@ export function markInterrupted(outDir: string, runId: string, extra?: Rec): str
 
 export function loadDone(
   outDir: string,
-  runId: string
+  runId: string,
 ): { done: Record<number, Rec>; datasetHash: string | null } {
   const p = runPaths(outDir, runId).checkpoint;
   if (!nodeFs.existsSync(p)) return { done: {}, datasetHash: null };
@@ -385,7 +372,7 @@ export function saveDone(
   outDir: string,
   runId: string,
   done: Record<number, Rec>,
-  datasetHash: string | null
+  datasetHash: string | null,
 ): string {
   const sorted = Object.keys(done)
     .map(Number)
@@ -417,7 +404,14 @@ export function scanJsonl(path: string): { records: Rec[]; report: JsonlReport }
   if (!nodeFs.existsSync(path)) {
     return {
       records,
-      report: { nLines: 0, nRecords: 0, badLines: [], truncatedTail: false, bytes: 0, exists: false },
+      report: {
+        nLines: 0,
+        nRecords: 0,
+        badLines: [],
+        truncatedTail: false,
+        bytes: 0,
+        exists: false,
+      },
     };
   }
   const stat = nodeFs.statSync(path);
@@ -455,13 +449,16 @@ export function readJsonl(path: string, strict = true): Rec[] {
       ? " The last line is the broken one, which is what a process killed mid-write looks like -- re-run with --resume to continue from the checkpoint."
       : "";
     throw new Error(
-      `${path}: ${report.badLines.length} malformed line(s), first at line ${first[0]} (${first[1]}).${hint}`
+      `${path}: ${report.badLines.length} malformed line(s), first at line ${first[0]} (${first[1]}).${hint}`,
     );
   }
   return records;
 }
 
-export function deleteRun(outDir: string, runId: string): {
+export function deleteRun(
+  outDir: string,
+  runId: string,
+): {
   removed: string[];
   missing: string[];
 } {

@@ -13,8 +13,7 @@
 
 import { createHash } from "node:crypto";
 import * as nodeFs from "node:fs";
-import * as nodePath from "node:path";
-import { pyCanonicalDumps, pyDumps, type Json } from "@drawtle/core";
+import { type Json, pyCanonicalDumps, pyDumps } from "@drawtle/core";
 import { atomicWriteJson, runPaths } from "./runstate";
 
 export const KEY_LEN = 16;
@@ -54,9 +53,7 @@ export function contentKey(content: Content): string {
 }
 
 function fullHash(content: Content): string {
-  return createHash("sha256")
-    .update(pyCanonicalDumps(content), "utf8")
-    .digest("hex");
+  return createHash("sha256").update(pyCanonicalDumps(content), "utf8").digest("hex");
 }
 
 export class TranscriptPool {
@@ -161,7 +158,7 @@ export class TranscriptPool {
       if (!ent) throw new Error(`transcript references missing pool entry '${key}'`);
       if (ent.sha256 && fullHash(ent.content) !== ent.sha256) {
         throw new Error(
-          `pool entry '${key}' does not match its recorded hash; the transcript is corrupt and cannot be replayed faithfully. (This detects damage, not tampering -- see the v2 module docstring.)`
+          `pool entry '${key}' does not match its recorded hash; the transcript is corrupt and cannot be replayed faithfully. (This detects damage, not tampering -- see the v2 module docstring.)`,
         );
       }
       out.push({ role: ent.role, content: ent.content });
@@ -171,29 +168,23 @@ export class TranscriptPool {
 }
 
 export function poolPath(outDir: string, runId: string): string {
-  return runPaths(outDir, runId).jsonl + ".transcript.json";
+  return `${runPaths(outDir, runId).jsonl}.transcript.json`;
 }
 
-export function savePool(
-  outDir: string,
-  runId: string,
-  pool: TranscriptPool
-): string {
+export function savePool(outDir: string, runId: string, pool: TranscriptPool): string {
   return atomicWriteJson(poolPath(outDir, runId), pool.toBlob());
 }
 
 export function loadPool(outDir: string, runId: string): TranscriptPool | null {
   const p = poolPath(outDir, runId);
   if (!nodeFs.existsSync(p)) return null;
-  return TranscriptPool.fromBlob(
-    JSON.parse(nodeFs.readFileSync(p, "utf8")) as PoolBlob
-  );
+  return TranscriptPool.fromBlob(JSON.parse(nodeFs.readFileSync(p, "utf8")) as PoolBlob);
 }
 
 export function attachToRecord(
   rec: Record<string, unknown>,
   pool: TranscriptPool,
-  messages: Array<{ role?: string; content: unknown }>
+  messages: Array<{ role?: string; content: unknown }>,
 ): Record<string, unknown> {
   rec.prompt_keys = pool.addTurn(messages);
   return rec;
@@ -201,5 +192,5 @@ export function attachToRecord(
 
 /** Relative transcript path for a run dir (helper for the board). */
 export function transcriptRel(runJsonl: string): string {
-  return runJsonl + ".transcript.json";
+  return `${runJsonl}.transcript.json`;
 }

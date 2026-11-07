@@ -5,11 +5,11 @@
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { H } from "./ui.tsx";
-import { Overview } from "./views/overview.tsx";
-import { Runs } from "./views/runs.tsx";
-import { RunDetail } from "./views/run.tsx";
 import { Compare } from "./views/compare.tsx";
 import { Launch } from "./views/launch.tsx";
+import { Overview } from "./views/overview.tsx";
+import { RunDetail } from "./views/run.tsx";
+import { Runs } from "./views/runs.tsx";
 import { System } from "./views/system.tsx";
 
 const TABS = [
@@ -63,13 +63,15 @@ function App() {
         ${tab === "#/launch" ? H`<${Launch} go=${go} />` : null}
         ${tab === "#/system" ? H`<${System} />` : null}
         ${runId ? H`<${RunDetail} runId=${decodeURIComponent(runId)} />` : null}
-        ${compareMatch
-          ? H`<${Compare}
+        ${
+          compareMatch
+            ? H`<${Compare}
               a=${cmp.a}
               b=${cmp.b}
               pick=${(which: "a" | "b", id: string) => setCmp((c) => ({ ...c, [which]: id }))}
             />`
-          : null}
+            : null
+        }
       </main>
     </div>
   `;

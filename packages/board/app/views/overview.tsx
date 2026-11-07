@@ -1,11 +1,20 @@
 /** Overview: the instrument (MDI, reference curves) + the honest leaderboard. */
 import { useEffect, useState } from "preact/hooks";
-import { H, Chip, Bar, Kpi, BarChart } from "../ui.tsx";
-import { get, fmt, type LeaderboardRow } from "../api.ts";
+import { type LeaderboardRow, fmt, get } from "../api.ts";
+import { BarChart, Chip, H, Kpi } from "../ui.tsx";
 
 interface Analytics {
-  bench_properties: { optimal_progress: number; stale_by_lag: Record<string, number>; mdi: number } | null;
-  reference_rows: Array<{ label: string; lag: number | null; progress_rate: number | null; hit_wall_rate: number | null }> | null;
+  bench_properties: {
+    optimal_progress: number;
+    stale_by_lag: Record<string, number>;
+    mdi: number;
+  } | null;
+  reference_rows: Array<{
+    label: string;
+    lag: number | null;
+    progress_rate: number | null;
+    hit_wall_rate: number | null;
+  }> | null;
   semantics: {
     rigid_invariance: { n: number; of: number; rate: number | null };
     relabelled_vs_rigid: { n: number; of: number; rate: number | null };
@@ -13,15 +22,19 @@ interface Analytics {
   } | null;
 }
 
-export function Overview(props: { go: (hash: string) => void }) {
-  const [lb, setLb] = useState<{ rows: LeaderboardRow[]; excluded: Array<{ run_id: string; status: string; reason: string }> } | null>(null);
+export function Overview(_props: { go: (hash: string) => void }) {
+  const [lb, setLb] = useState<{
+    rows: LeaderboardRow[];
+    excluded: Array<{ run_id: string; status: string; reason: string }>;
+  } | null>(null);
   const [an, setAn] = useState<Analytics | null>(null);
   const [mode, setMode] = useState("");
 
   useEffect(() => {
-    get<{ rows: LeaderboardRow[]; excluded: Array<{ run_id: string; status: string; reason: string }> }>(
-      `/api/v3/leaderboard${mode ? `?mode=${mode}` : ""}`
-    ).then(setLb);
+    get<{
+      rows: LeaderboardRow[];
+      excluded: Array<{ run_id: string; status: string; reason: string }>;
+    }>(`/api/v3/leaderboard${mode ? `?mode=${mode}` : ""}`).then(setLb);
   }, [mode]);
   useEffect(() => {
     get<Analytics>("/api/v3/analytics").then(setAn);
@@ -30,14 +43,23 @@ export function Overview(props: { go: (hash: string) => void }) {
   const bp = an?.bench_properties ?? null;
   const refRows = an?.reference_rows ?? [];
   const groups = [
-    { label: "optimal", bars: [{ label: "optimal", value: bp?.optimal_progress ?? null, color: "var(--good)" }] },
+    {
+      label: "optimal",
+      bars: [{ label: "optimal", value: bp?.optimal_progress ?? null, color: "var(--good)" }],
+    },
     ...[1, 2, 3].map((lag) => ({
       label: `lag ${lag}`,
       bars: [
-        { label: "stale-maze", value: bp?.stale_by_lag?.[String(lag)] ?? null, color: "var(--bad)" },
+        {
+          label: "stale-maze",
+          value: bp?.stale_by_lag?.[String(lag)] ?? null,
+          color: "var(--bad)",
+        },
         {
           label: "stale-heading",
-          value: refRows.find((r) => r.label.startsWith("StaleHeading") && r.lag === lag)?.progress_rate ?? null,
+          value:
+            refRows.find((r) => r.label.startsWith("StaleHeading") && r.lag === lag)
+              ?.progress_rate ?? null,
           color: "var(--accent)",
         },
       ],
@@ -58,7 +80,9 @@ export function Overview(props: { go: (hash: string) => void }) {
         ${bp ? H`<${BarChart} title="Progress rate vs memory lag" groups=${groups} yMax=${1} caption="Optimal (green) is the ceiling. Stale-maze (red) is the failure mode the bench detects; stale-heading (blue) degrades non-linearly." />` : H`<p class="hint">loading…</p>`}
         <p class="hint">
           MDI = 1 − mean(stale)/optimal = ${bp?.mdi ?? "—"}. Flat in lag
-          (${Object.values(bp?.stale_by_lag ?? {}).map((v) => v.toFixed(3)).join(", ")}) —
+          (${Object.values(bp?.stale_by_lag ?? {})
+            .map((v) => v.toFixed(3))
+            .join(", ")}) —
           MDI measures a floor, not a depth gradient (PAPER §9.2).
         </p>
       </div>
@@ -67,13 +91,16 @@ export function Overview(props: { go: (hash: string) => void }) {
         <div class="tabs">
           ${["", "live", "test"].map((m) => H`<button class=${m === mode ? "on" : ""} onClick=${() => setMode(m)}>${m || "all"}</button>`)}
         </div>
-        ${lb ? H`
+        ${
+          lb
+            ? H`
           <table class="tbl">
             <thead><tr>
               <th>model</th><th>backend</th><th class="num">progress</th><th>95% CI</th><th>cluster CI</th><th class="num">cost</th><th></th>
             </tr></thead>
             <tbody>
-              ${lb.rows.map((r) => H`
+              ${lb.rows.map(
+                (r) => H`
                 <tr>
                   <td>${r.model ?? "?"}</td>
                   <td><${Chip} tone="muted">${r.backend ?? "?"}</${Chip}> <${Chip} tone=${r.mode === "live" ? "good" : "warn"}>${r.mode}</${Chip}></td>
@@ -83,18 +110,25 @@ export function Overview(props: { go: (hash: string) => void }) {
                   <td class="num">${fmt.usd(r.total_cost_usd)}</td>
                   <td><a href=${`#/run/${r.run_id}`}>open</a></td>
                 </tr>
-              `)}
+              `,
+              )}
             </tbody>
           </table>
-          ${lb.excluded.length ? H`
+          ${
+            lb.excluded.length
+              ? H`
             <h2 style=${{ marginTop: "0.8rem" }}>Excluded — never ranked, never silent <span class="sub">${lb.excluded.length} run(s)</span></h2>
             <table class="tbl">
               <thead><tr><th>run</th><th>status</th><th>reason</th></tr></thead>
               <tbody>
                 ${lb.excluded.map((e) => H`<tr><td class="mono">${e.run_id}</td><td><${Chip} tone=${e.status === "unknown" ? "muted" : "bad"}>${e.status}</${Chip}></td><td class="hint">${e.reason ?? ""}</td></tr>`)}
               </tbody>
-            </table>` : null}
-        ` : H`<p class="hint">loading…</p>`}
+            </table>`
+              : null
+          }
+        `
+            : H`<p class="hint">loading…</p>`
+        }
         <p class="hint">Overlapping intervals do not support calling a winner — use Compare for a paired verdict.</p>
       </div>
     </div>

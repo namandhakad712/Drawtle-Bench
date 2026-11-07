@@ -1,10 +1,13 @@
+import htm from "htm";
 /** Shared UI primitives: htm-bound h, chips, bars, and hand-rolled SVG charts. */
 import { h } from "preact";
-import htm from "htm";
 
 export const H = htm.bind(h);
 
-export function Chip(props: { tone?: "good" | "bad" | "warn" | "muted"; children: preact.ComponentChild }) {
+export function Chip(props: {
+  tone?: "good" | "bad" | "warn" | "muted";
+  children: preact.ComponentChild;
+}) {
   return H`<span class="chip ${props.tone ?? ""}">${props.children}</span>`;
 }
 
@@ -26,7 +29,10 @@ export function BarChart(props: {
   caption?: string;
   width?: number;
   height?: number;
-  groups: Array<{ label: string; bars: Array<{ label: string; value: number | null; color: string }> }>;
+  groups: Array<{
+    label: string;
+    bars: Array<{ label: string; value: number | null; color: string }>;
+  }>;
   yMax?: number;
   yFormat?: (v: number) => string;
 }) {
@@ -50,18 +56,22 @@ export function BarChart(props: {
       const hgt = b.value === null ? 0 : (b.value / yMax) * (Hh - T - 34);
       const x = x0 + bi * unitW;
       parts.push(
-        H`<rect x=${x.toFixed(1)} y=${(Hh - 34 - hgt).toFixed(1)} width=${(unitW - 4).toFixed(1)} height=${hgt.toFixed(1)} rx="3" fill=${b.color ?? palette[bi % palette.length]}><title>${`${g.label} · ${b.label}: ${b.value === null ? "—" : b.value.toFixed(3)}`}</title></rect>`
+        H`<rect x=${x.toFixed(1)} y=${(Hh - 34 - hgt).toFixed(1)} width=${(unitW - 4).toFixed(1)} height=${hgt.toFixed(1)} rx="3" fill=${b.color ?? palette[bi % palette.length]}><title>${`${g.label} · ${b.label}: ${b.value === null ? "—" : b.value.toFixed(3)}`}</title></rect>`,
       );
     });
     parts.push(
-      H`<text x=${(L + gi * gw + gw / 2).toFixed(1)} y=${Hh - 16} font-size="11" fill="var(--muted)" text-anchor="middle">${g.label}</text>`
+      H`<text x=${(L + gi * gw + gw / 2).toFixed(1)} y=${Hh - 16} font-size="11" fill="var(--muted)" text-anchor="middle">${g.label}</text>`,
     );
   });
   for (let i = 0; i <= 4; i++) {
     const y = Hh - 34 - ((Hh - 34 - T) * i) / 4;
     const v = (yMax * i) / 4;
-    parts.push(H`<line x1=${L} y1=${y.toFixed(1)} x2=${W - 12} y2=${y.toFixed(1)} stroke="var(--rule)" stroke-width="1"/>`);
-    parts.push(H`<text x=${L - 6} y=${(y + 4).toFixed(1)} font-size="11" fill="var(--muted)" text-anchor="end">${yf(v)}</text>`);
+    parts.push(
+      H`<line x1=${L} y1=${y.toFixed(1)} x2=${W - 12} y2=${y.toFixed(1)} stroke="var(--rule)" stroke-width="1"/>`,
+    );
+    parts.push(
+      H`<text x=${L - 6} y=${(y + 4).toFixed(1)} font-size="11" fill="var(--muted)" text-anchor="end">${yf(v)}</text>`,
+    );
   }
   return H`<figure class="fig">
     ${props.title ? H`<div style=${{ fontWeight: 600, marginBottom: "0.3rem" }}>${props.title}</div>` : null}
@@ -94,17 +104,24 @@ export function Scatter(props: {
   const xMax = Math.max(...xs, 14);
   const sx = (x: number) => L + ((x - xMin) / Math.max(1, xMax - xMin)) * (W - L - 14);
   const sy = (y: number) => Hh - B - y * (Hh - B - 18) * (1 / yMax);
-  const dots = props.points.map((p, i) =>
-    H`<circle cx=${sx(typeof p.x === "number" ? p.x : Number(p.x)).toFixed(1)} cy=${sy(p.y ?? 0).toFixed(1)} r="5" fill="var(--accent)" fill-opacity="0.85" key=${i}><title>${`${p.label}: size ${String(p.x)} → ${p.y === null ? "—" : (p.y * 100).toFixed(1)}%`}</title></circle>`
+  const dots = props.points.map(
+    (p, i) =>
+      H`<circle cx=${sx(typeof p.x === "number" ? p.x : Number(p.x)).toFixed(1)} cy=${sy(p.y ?? 0).toFixed(1)} r="5" fill="var(--accent)" fill-opacity="0.85" key=${i}><title>${`${p.label}: size ${String(p.x)} → ${p.y === null ? "—" : (p.y * 100).toFixed(1)}%`}</title></circle>`,
   );
   const grid: preact.ComponentChild[] = [];
   for (let i = 0; i <= 4; i++) {
     const y = Hh - B - ((Hh - B - 18) * i) / 4;
-    grid.push(H`<line x1=${L} y1=${y.toFixed(1)} x2=${W - 14} y2=${y.toFixed(1)} stroke="var(--rule)"/>`);
-    grid.push(H`<text x=${L - 6} y=${(y + 4).toFixed(1)} font-size="11" fill="var(--muted)" text-anchor="end">${Math.round((yMax * i * 100) / 4)}%</text>`);
+    grid.push(
+      H`<line x1=${L} y1=${y.toFixed(1)} x2=${W - 14} y2=${y.toFixed(1)} stroke="var(--rule)"/>`,
+    );
+    grid.push(
+      H`<text x=${L - 6} y=${(y + 4).toFixed(1)} font-size="11" fill="var(--muted)" text-anchor="end">${Math.round((yMax * i * 100) / 4)}%</text>`,
+    );
   }
   for (let x = xMin; x <= xMax; x++) {
-    grid.push(H`<text x=${sx(x).toFixed(1)} y=${Hh - 16} font-size="11" fill="var(--muted)" text-anchor="middle">${x}</text>`);
+    grid.push(
+      H`<text x=${sx(x).toFixed(1)} y=${Hh - 16} font-size="11" fill="var(--muted)" text-anchor="middle">${x}</text>`,
+    );
   }
   return H`<figure class="fig">
     ${props.title ? H`<div style=${{ fontWeight: 600, marginBottom: "0.3rem" }}>${props.title}</div>` : null}

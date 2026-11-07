@@ -60,9 +60,7 @@ export class PyRandom {
   private initGenrand(s: number): void {
     this.mt[0] = s >>> 0;
     for (let i = 1; i < N; i++) {
-      this.mt[i] =
-        (Math.imul(1812433253, this.mt[i - 1] ^ (this.mt[i - 1] >>> 30)) +
-          i) >>> 0;
+      this.mt[i] = (Math.imul(1812433253, this.mt[i - 1] ^ (this.mt[i - 1] >>> 30)) + i) >>> 0;
     }
     this.mti = N;
   }
@@ -178,8 +176,8 @@ export function pySum(xs: readonly number[]): number {
   let c = 0;
   for (const x of xs) {
     const t = sum + x;
-    if (Math.abs(sum) >= Math.abs(x)) c += (sum - t) + x;
-    else c += (x - t) + sum;
+    if (Math.abs(sum) >= Math.abs(x)) c += sum - t + x;
+    else c += x - t + sum;
     sum = t;
   }
   return sum + c;
@@ -267,13 +265,7 @@ export function pyFloatStr(x: number): string {
 
 // ---------------------------------------------------------------- JSON --
 
-export type Json =
-  | null
-  | boolean
-  | number
-  | string
-  | Json[]
-  | { [k: string]: Json };
+export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
 function asciiEscape(s: string): string {
   let out = '"';
@@ -290,7 +282,7 @@ function asciiEscape(s: string): string {
       out += `\\u${c.toString(16).padStart(4, "0")}`;
     } else out += s[i];
   }
-  return out + '"';
+  return `${out}"`;
 }
 
 function encNum(n: number): string {
@@ -310,15 +302,11 @@ export function pyDumps(x: Json): string {
   if (typeof x === "string") return asciiEscape(x);
   if (Array.isArray(x)) {
     if (x.length === 0) return "[]";
-    return "[" + x.map((v) => pyDumps(v)).join(", ") + "]";
+    return `[${x.map((v) => pyDumps(v)).join(", ")}]`;
   }
   const keys = Object.keys(x);
   if (keys.length === 0) return "{}";
-  return (
-    "{" +
-    keys.map((k) => `${asciiEscape(k)}: ${pyDumps(x[k] as Json)}`).join(", ") +
-    "}"
-  );
+  return `{${keys.map((k) => `${asciiEscape(k)}: ${pyDumps(x[k] as Json)}`).join(", ")}}`;
 }
 
 /**
@@ -332,13 +320,9 @@ export function pyCanonicalDumps(x: Json): string {
   if (typeof x === "string") return asciiEscape(x);
   if (Array.isArray(x)) {
     if (x.length === 0) return "[]";
-    return "[" + x.map((v) => pyCanonicalDumps(v)).join(",") + "]";
+    return `[${x.map((v) => pyCanonicalDumps(v)).join(",")}]`;
   }
   const keys = Object.keys(x).sort();
   if (keys.length === 0) return "{}";
-  return (
-    "{" +
-    keys.map((k) => `${asciiEscape(k)}:${pyCanonicalDumps(x[k] as Json)}`).join(",") +
-    "}"
-  );
+  return `{${keys.map((k) => `${asciiEscape(k)}:${pyCanonicalDumps(x[k] as Json)}`).join(",")}}`;
 }

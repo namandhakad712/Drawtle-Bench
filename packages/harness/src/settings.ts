@@ -12,8 +12,7 @@ import * as nodePath from "node:path";
 import { LOCAL_DIR } from "./catalog";
 
 export const SETTINGS_FILE =
-  process.env.DRAWTLE_SETTINGS_FILE ??
-  nodePath.join(LOCAL_DIR, "settings.json");
+  process.env.DRAWTLE_SETTINGS_FILE ?? nodePath.join(LOCAL_DIR, "settings.json");
 
 export const DEFAULTS: Record<string, unknown> = {
   theme: "light",
@@ -94,7 +93,7 @@ export function write(patch: Record<string, unknown>): Record<string, unknown> {
   const unknown = Object.keys(patch).filter((k) => !(k in DEFAULTS));
   if (unknown.length) {
     throw new SettingsError(
-      `unknown setting(s): ${unknown.join(", ")}. Known settings: ${Object.keys(DEFAULTS).join(", ")}`
+      `unknown setting(s): ${unknown.join(", ")}. Known settings: ${Object.keys(DEFAULTS).join(", ")}`,
     );
   }
   const current = read();
@@ -112,7 +111,7 @@ export function write(patch: Record<string, unknown>): Record<string, unknown> {
     nodeFs.renameSync(tmp, SETTINGS_FILE);
   } catch (e) {
     throw new SettingsWriteError(
-      `could not write ${SETTINGS_FILE} (${String(e)}); the config directory may be read-only`
+      `could not write ${SETTINGS_FILE} (${String(e)}); the config directory may be read-only`,
     );
   }
   return current;
@@ -131,7 +130,8 @@ export function toggleFavorite(mid: string, on: boolean): string[] {
   const id = String(mid ?? "").trim();
   if (!id) throw new SettingsError("a model id is required");
   const favs = [...(((read().favorites as string[]) ?? []) as string[])];
-  const onB = typeof on === "boolean" ? on : ["true", "1", "yes", "on"].includes(String(on).toLowerCase());
+  const onB =
+    typeof on === "boolean" ? on : ["true", "1", "yes", "on"].includes(String(on).toLowerCase());
   if (onB && !favs.includes(id)) favs.push(id);
   else if (!onB && favs.includes(id)) favs.splice(favs.indexOf(id), 1);
   return (write({ favorites: favs }).favorites as string[]) ?? [];

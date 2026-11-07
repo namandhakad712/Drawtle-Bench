@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { type MazeSpec, makeMaze } from "../src/dataset";
+import {
+  type Cell,
+  EXIT_PAIRS,
+  applyAction,
+  distanceField,
+  initialHeading,
+  make,
+  optimalAction,
+  rotateWalls,
+  solve,
+} from "../src/maze";
 import { PyRandom } from "../src/py";
 import { pyFloatStr } from "../src/py";
-import {
-  make,
-  initialHeading,
-  distanceField,
-  optimalAction,
-  applyAction,
-  solve,
-  rotateWalls,
-  EXIT_PAIRS,
-  type Cell,
-} from "../src/maze";
-import { makeMaze, type MazeSpec } from "../src/dataset";
 import { loadJson } from "./helpers";
 
 const mazesFix = loadJson<{
@@ -72,7 +72,7 @@ function checkStructural(
     solve_final_cell: number[];
     walls: string[];
   },
-  at: string
+  at: string,
 ): void {
   expect(got.w).toBe(want.size);
   expect(got.pair).toBe(want.pair);
@@ -93,12 +93,7 @@ function checkStructural(
   }
   expect(dist.get(`${got.entry[0]},${got.entry[1]}`)).toBe(want.dist_entry);
 
-  const opt = optimalAction(
-    got,
-    got.entry,
-    initialHeading(got),
-    distanceField(got)
-  );
+  const opt = optimalAction(got, got.entry, initialHeading(got), distanceField(got));
   if (want.optimal_entry === null) expect(opt).toBeNull();
   else {
     expect(opt).not.toBeNull();
@@ -118,7 +113,7 @@ function checkStructural(
     .wallSegments()
     .map(
       ([x1, y1, x2, y2]) =>
-        `${pyFloatStr(x1)},${pyFloatStr(y1)}>${pyFloatStr(x2)},${pyFloatStr(y2)}`
+        `${pyFloatStr(x1)},${pyFloatStr(y1)}>${pyFloatStr(x2)},${pyFloatStr(y2)}`,
     )
     .sort();
   expect(walls).toEqual(want.walls);

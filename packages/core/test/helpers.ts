@@ -1,5 +1,5 @@
-import * as nodePath from "node:path";
 import { readFileSync } from "node:fs";
+import * as nodePath from "node:path";
 
 export const REPO_ROOT = nodePath.resolve(import.meta.dir, "../../..");
 export const GOLDEN = nodePath.join(REPO_ROOT, "fixtures", "golden");
@@ -40,10 +40,7 @@ export function expectDeepEqual(actual: unknown, expected: unknown, at = ""): vo
       expectDeepEqual(ea[k], (expected as Record<string, unknown>)[k], `${at}.${k}`);
     }
     for (const k of Object.keys(ea)) {
-      expect(
-        k in (expected as Record<string, unknown>),
-        `${at}: extra key ${k}`
-      ).toBeTrue();
+      expect(k in (expected as Record<string, unknown>), `${at}: extra key ${k}`).toBeTrue();
     }
     return;
   }
@@ -59,11 +56,7 @@ export function expectDeepEqual(actual: unknown, expected: unknown, at = ""): vo
  * reproduced bit-exactly. The port may ADD keys (v3 extras); those are not
  * compared.
  */
-export function expectSupersetEqual(
-  actual: unknown,
-  expected: unknown,
-  at = ""
-): void {
+export function expectSupersetEqual(actual: unknown, expected: unknown, at = ""): void {
   if (Array.isArray(expected)) {
     expect(Array.isArray(actual), `${at}: not an array`).toBeTrue();
     expect((actual as unknown[]).length).toBe(expected.length);

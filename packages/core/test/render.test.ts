@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { makeMaze, type MazeSpec, parseManifestText, manifestText, buildManifest } from "../src/dataset";
-import { renderSvg, pyRadians, orbitCamera } from "../src/render";
-import { defaultCamera, WALL_H } from "../src/protocol";
+import {
+  type MazeSpec,
+  buildManifest,
+  makeMaze,
+  manifestText,
+  parseManifestText,
+} from "../src/dataset";
 import { initialHeading, rotateWalls } from "../src/maze";
-import { loadJson, loadGoldenText, loadResultsText } from "./helpers";
+import { WALL_H, defaultCamera } from "../src/protocol";
+import { orbitCamera, pyRadians, renderSvg } from "../src/render";
+import { loadGoldenText, loadJson, loadResultsText } from "./helpers";
 
 const framesFix = loadJson<{
   cases: Array<{ idx: number; size: number; rot: number; sha256: string; bytes: number }>;
@@ -33,8 +39,7 @@ const specOf = (idx: number): MazeSpec => {
   return { idx: m.idx, size: m.size, pair: m.pair, seed: BigInt(m.seed) };
 };
 
-const sha16 = (s: string) =>
-  createHash("sha256").update(s, "utf8").digest("hex").slice(0, 16);
+const sha16 = (s: string) => createHash("sha256").update(s, "utf8").digest("hex").slice(0, 16);
 
 describe("camera constants (V8 == glibc, locked)", () => {
   test("trig values match the Python-computed fixture bits", () => {
@@ -58,7 +63,7 @@ describe("camera constants (V8 == glibc, locked)", () => {
         maze,
         framesFix.constants.cam_az,
         framesFix.constants.cam_dist,
-        framesFix.constants.cam_height
+        framesFix.constants.cam_height,
       );
       expect(cam.pos[0]).toBe(want[0]);
       expect(cam.pos[1]).toBe(want[1]);
@@ -81,7 +86,7 @@ describe("frame SVG parity", () => {
         0.0,
         cam,
         WALL_H,
-        { showHeading: false }
+        { showHeading: false },
       );
       expect(svg).toBe(want);
     }
@@ -103,7 +108,7 @@ describe("frame SVG parity", () => {
         0.0,
         cam,
         WALL_H,
-        { showHeading: false }
+        { showHeading: false },
       );
       expect(sha16(svg)).toBe(c.sha256);
       expect(new TextEncoder().encode(svg).length).toBe(c.bytes);

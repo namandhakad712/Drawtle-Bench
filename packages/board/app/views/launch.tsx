@@ -1,7 +1,7 @@
 /** Launch: preflight, cost estimate, start, and the live stream. */
 import { useEffect, useRef, useState } from "preact/hooks";
-import { H, Chip } from "../ui.tsx";
-import { get, post, fmt } from "../api.ts";
+import { fmt, get, post } from "../api.ts";
+import { H } from "../ui.tsx";
 
 interface ModelEntry {
   provider: string;
@@ -31,7 +31,7 @@ interface LiveLine {
   status?: string;
 }
 
-export function Launch(props: { go: (hash: string) => void }) {
+export function Launch(_props: { go: (hash: string) => void }) {
   const [backends, setBackends] = useState<string[]>([]);
   const [models, setModels] = useState<Record<string, ModelEntry>>({});
   const [backend, setBackend] = useState("mock");
@@ -44,7 +44,10 @@ export function Launch(props: { go: (hash: string) => void }) {
   const [limit, setLimit] = useState(0);
   const [maxTurns, setMaxTurns] = useState(48);
   const [runMode, setRunMode] = useState("test");
-  const [estimate, setEstimate] = useState<null | { estimated_cost_usd: number; price_known: boolean }>(null);
+  const [estimate, setEstimate] = useState<null | {
+    estimated_cost_usd: number;
+    price_known: boolean;
+  }>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [liveRun, setLiveRun] = useState<string | null>(null);
@@ -52,13 +55,20 @@ export function Launch(props: { go: (hash: string) => void }) {
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    get<{ providers: Record<string, unknown>; models: Record<string, ModelEntry> }>("/api/v3/registry").then((d) => {
+    get<{ providers: Record<string, unknown>; models: Record<string, ModelEntry> }>(
+      "/api/v3/registry",
+    ).then((d) => {
       setBackends(["mock", ...Object.keys(d.providers)]);
       setModels(d.models);
     });
     get<{ runs: Array<{ run_id: string }> }>("/api/v3/runs").then((d) => {
       const ids = d.runs.filter((r) => r.run_id.startsWith("ci-")).map((r) => r.run_id);
-      setDatasets(["results/dataset-20.json", "results/dataset-50.json", "results/dataset-100.json", "results/dataset-200.json"]);
+      setDatasets([
+        "results/dataset-20.json",
+        "results/dataset-50.json",
+        "results/dataset-100.json",
+        "results/dataset-200.json",
+      ]);
       setDataset("results/dataset-20.json");
       void ids;
     });
@@ -67,9 +77,9 @@ export function Launch(props: { go: (hash: string) => void }) {
   useEffect(() => {
     if (backend !== "mock") return;
     get<null | { estimated_cost_usd: number; price_known: boolean }>(
-      `/api/v3/cost-estimate?model=${encodeURIComponent(model)}&dataset=${encodeURIComponent(dataset)}&limit=${limit || 0}&max_turns=${maxTurns}`
+      `/api/v3/cost-estimate?model=${encodeURIComponent(model)}&dataset=${encodeURIComponent(dataset)}&limit=${limit || 0}&max_turns=${maxTurns}`,
     ).then((e) => setEstimate(e));
-  }, [model, dataset, limit, maxTurns]);
+  }, [backend, model, dataset, limit, maxTurns]);
 
   const startLive = (runId: string): void => {
     esRef.current?.close();
@@ -78,7 +88,10 @@ export function Launch(props: { go: (hash: string) => void }) {
     const es = new EventSource(`/api/v3/live/${encodeURIComponent(runId)}`);
     esRef.current = es;
     es.addEventListener("turn", (ev) => {
-      setLines((ls) => [...ls.slice(-400), { kind: "turn", turn: JSON.parse((ev as MessageEvent).data) }]);
+      setLines((ls) => [
+        ...ls.slice(-400),
+        { kind: "turn", turn: JSON.parse((ev as MessageEvent).data) },
+      ]);
     });
     es.addEventListener("status", (ev) => {
       const d = JSON.parse((ev as MessageEvent).data) as { status: string };
@@ -124,22 +137,32 @@ export function Launch(props: { go: (hash: string) => void }) {
 
   const isMock = backend === "mock";
   const modelNames = Object.keys(models);
-  const filteredModels = isMock ? ["mock"] : modelNames.filter((m) => (models[m]?.provider ?? "") !== "");
+  const filteredModels = isMock
+    ? ["mock"]
+    : modelNames.filter((m) => (models[m]?.provider ?? "") !== "");
 
   return H`
     <div class="grid cols-2">
       <div class="card">
         <h2>Launch a run <span class="sub">preflight → estimate → start → watch live</span></h2>
         <div class="field"><label>backend</label>
-          <select value=${backend} onChange=${(e: Event) => { const v = (e.target as HTMLSelectElement).value; setBackend(v); setModel(v === "mock" ? "mock" : ""); }}>
+          <select value=${backend} onChange=${(e: Event) => {
+            const v = (e.target as HTMLSelectElement).value;
+            setBackend(v);
+            setModel(v === "mock" ? "mock" : "");
+          }}>
             ${backends.map((b) => H`<option value=${b} selected=${b === backend}>${b}</option>`)}
           </select>
         </div>
         <div class="field"><label>model</label>
-          ${isMock ? H`<input type="text" value="mock" disabled />` : H`
+          ${
+            isMock
+              ? H`<input type="text" value="mock" disabled />`
+              : H`
             <input type="text" list="model-list" value=${model} onInput=${(e: Event) => setModel((e.target as HTMLInputElement).value)} placeholder="start typing — registry matches by prefix" />
             <datalist id="model-list">${filteredModels.slice(0, 200).map((m) => H`<option value=${m}>${m}</option>`)}</datalist>
-          `}
+          `
+          }
         </div>
         <div class="field"><label>dataset (the ladder is prefix-compatible)</label>
           <select value=${dataset} onChange=${(e: Event) => setDataset((e.target as HTMLSelectElement).value)}>
@@ -150,7 +173,9 @@ export function Launch(props: { go: (hash: string) => void }) {
           <div class="field"><label>turn cap</label><input type="number" value=${maxTurns} onInput=${(e: Event) => setMaxTurns(Number((e.target as HTMLInputElement).value) || 48)} /></div>
           <div class="field"><label>limit (0 = whole set)</label><input type="number" value=${limit} onInput=${(e: Event) => setLimit(Number((e.target as HTMLInputElement).value) || 0)} /></div>
         </div>
-        ${isMock ? H`
+        ${
+          isMock
+            ? H`
           <div class="grid cols-2">
             <div class="field"><label>mock mode</label>
               <select value=${mode} onChange=${(e: Event) => setMode((e.target as HTMLSelectElement).value)}>
@@ -159,7 +184,9 @@ export function Launch(props: { go: (hash: string) => void }) {
               </select>
             </div>
             ${mode === "stale" ? H`<div class="field"><label>lag</label><input type="number" value=${lag} onInput=${(e: Event) => setLag(Number((e.target as HTMLInputElement).value) || 1)} /></div>` : null}
-          </div>` : null}
+          </div>`
+            : null
+        }
         <div class="field"><label>run mode (stamped into the artifact, forever)</label>
           <select value=${runMode} onChange=${(e: Event) => setRunMode((e.target as HTMLSelectElement).value)}>
             <option value="test">test (mock / self-test — never ranked as live)</option>
@@ -169,13 +196,17 @@ export function Launch(props: { go: (hash: string) => void }) {
         <div class="field" style=${{ display: "flex", gap: "1rem", alignItems: "center" }}>
           <label style=${{ margin: 0 }}><input type="checkbox" checked=${navigate} onChange=${(e: Event) => setNavigate((e.target as HTMLInputElement).checked)} /> navigation mode (turtle walks to a fixed exit)</label>
         </div>
-        ${!isMock && model ? H`
+        ${
+          !isMock && model
+            ? H`
           <p class="hint">
             ${models[model]?.matched ? "" : "unknown model — add it to registry/models.json for honest cost/context; "}
             price ${fmt.usd(models[model]?.price_in ?? 0)}/1k in · context ${fmt.num(models[model]?.context_window)} ·
             estimate ${estimate ? H`<b>${fmt.usd(estimate.estimated_cost_usd)}</b>${estimate.price_known ? "" : " (price unknown — this is 0, not free)"}` : "…"}
             <br />re-runs are free and identical through the response cache.
-          </p>` : null}
+          </p>`
+            : null
+        }
         <div style=${{ display: "flex", gap: "0.6rem", marginTop: "0.6rem" }}>
           <button class="primary" disabled=${busy || !backend || !model || !dataset} onClick=${launch}>${busy ? "starting…" : "Start run"}</button>
           ${liveRun ? H`<button class="danger" onClick=${stop}>Stop ${liveRun}</button>` : null}
@@ -198,7 +229,7 @@ export function Launch(props: { go: (hash: string) => void }) {
                 </span>`
               : l.kind === "status"
                 ? H`<span class="turn-line" key=${i}><span class="muted">— status: ${l.status}</span></span>`
-                : null
+                : null,
           )}
         </div>
         <p class="hint" style=${{ marginTop: "0.5rem" }}>Every turn is written the moment it exists; the log is the same file the summary is computed from. Nothing is graded by hand.</p>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { loadJson, RESULTS, expectSupersetEqual } from "../../core/test/helpers";
+import { RESULTS, expectSupersetEqual, loadJson } from "../../core/test/helpers";
 import { aggregateRun, loadBenchProperties } from "../src/index";
 import { aggregateFull } from "../src/index";
 
@@ -30,7 +30,7 @@ describe("stats aggregate parity (the real agnes run, all fields bit-exact)", ()
     expect((bp as { mdi: number }).mdi).toBe(0.476);
     expect((bp as { optimal_progress: number }).optimal_progress).toBeCloseTo(
       0.9260416666666667,
-      15
+      15,
     );
   });
 

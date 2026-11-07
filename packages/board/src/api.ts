@@ -12,32 +12,27 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import {
+  aggregateFull as aggregate,
+  clearKey,
+  compare as compareRuns,
+  describeSettings,
   enumerateRuns,
   excludedRuns,
   leaderboard,
-  aggregateFull as aggregate,
   loadBenchProperties,
-  compare as compareRuns,
-  runPaths,
-  readStatus,
-  readJsonl,
-  providers,
-  providerSpec,
+  mask,
   mergedModels,
   modelInfo,
-  resolveKey,
-  mask,
-  storeKey,
-  clearKey,
+  providers,
   rasteriserStatus,
+  readJsonl,
+  resolveKey,
   responseCacheStats,
-  cacheDir,
-  describeSettings,
-  readSettings,
-  writeSettings,
-  toggleFavorite,
+  runPaths,
   describe as sandboxDescribe,
-  STATUS_STARTED,
+  storeKey,
+  toggleFavorite,
+  writeSettings,
 } from "@drawtle/harness";
 import { activeJobs, killRun, streamRun } from "./supervisor";
 
@@ -54,7 +49,7 @@ type Handler = (
   req: Request,
   url: URL,
   ctx: BoardCtx,
-  params: Record<string, string>
+  params: Record<string, string>,
 ) => Promise<Response> | Response;
 
 function json(data: unknown, init?: ResponseInit): Response {
@@ -64,8 +59,7 @@ function json(data: unknown, init?: ResponseInit): Response {
   });
 }
 
-const notFound = (what: string) =>
-  json({ error: `${what} not found` }, { status: 404 });
+const notFound = (what: string) => json({ error: `${what} not found` }, { status: 404 });
 
 function readJsonBody(req: Request): Promise<Rec> {
   return req
@@ -76,23 +70,22 @@ function readJsonBody(req: Request): Promise<Rec> {
 
 // ---------------------------------------------------------------- routes --
 
-export const routes: Array<{ method: string; pattern: RegExp; keys: string[]; handler: Handler }> = [];
+export const routes: Array<{ method: string; pattern: RegExp; keys: string[]; handler: Handler }> =
+  [];
 
 function route(method: string, path: string, handler: Handler): void {
   const keys: string[] = [];
   const rx = new RegExp(
-    "^" +
-      path
-        .split("/")
-        .map((seg) => {
-          if (seg.startsWith(":")) {
-            keys.push(seg.slice(1));
-            return "([^/]+)";
-          }
-          return seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        })
-        .join("/") +
-      "$"
+    `^${path
+      .split("/")
+      .map((seg) => {
+        if (seg.startsWith(":")) {
+          keys.push(seg.slice(1));
+          return "([^/]+)";
+        }
+        return seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      })
+      .join("/")}$`,
   );
   routes.push({ method, pattern: rx, keys, handler });
 }
@@ -169,7 +162,7 @@ route("GET", "/api/v3/run/:id", (_req, _url, ctx, p) => {
   });
 });
 
-route("GET", "/api/v3/run/:id/turns", (req, url, ctx, p) => {
+route("GET", "/api/v3/run/:id/turns", (_req, url, ctx, p) => {
   const paths = runPaths(ctx.resultsDir, p.id);
   if (!nodeFs.existsSync(paths.jsonl)) return notFound(`log for ${p.id}`);
   const episode = url.searchParams.get("episode");
@@ -180,7 +173,8 @@ route("GET", "/api/v3/run/:id/turns", (req, url, ctx, p) => {
   } catch {
     return json({ error: "log unreadable" }, { status: 500 });
   }
-  const filtered = episode !== null ? records.filter((r) => String(r.episode) === episode) : records;
+  const filtered =
+    episode !== null ? records.filter((r) => String(r.episode) === episode) : records;
   return json({
     run_id: p.id,
     total: records.length,
@@ -208,7 +202,7 @@ route("GET", "/api/v3/analytics", (_req, _url, ctx) => {
   const benchDemo = (() => {
     try {
       return JSON.parse(
-        nodeFs.readFileSync(nodePath.join(ctx.resultsDir, "bench_demo.json"), "utf8")
+        nodeFs.readFileSync(nodePath.join(ctx.resultsDir, "bench_demo.json"), "utf8"),
       );
     } catch {
       return null;
@@ -220,7 +214,7 @@ route("GET", "/api/v3/analytics", (_req, _url, ctx) => {
     semantics: (() => {
       try {
         return JSON.parse(
-          nodeFs.readFileSync(nodePath.join(ctx.resultsDir, "semantics_check.json"), "utf8")
+          nodeFs.readFileSync(nodePath.join(ctx.resultsDir, "semantics_check.json"), "utf8"),
         );
       } catch {
         return null;
@@ -293,7 +287,7 @@ route("GET", "/api/v3/registry", (_req, url, _ctx) => {
           usage_fields: spec.usage_fields,
           openai_compat: spec.openai_compat,
         },
-      ])
+      ]),
     ),
   });
 });
@@ -378,7 +372,7 @@ route("GET", "/api/v3/vision-probe", async (_req, _url, _ctx) => {
 });
 
 route("GET", "/api/v3/response-cache", (_req, _url, ctx) =>
-  json(responseCacheStats(ctx.resultsDir))
+  json(responseCacheStats(ctx.resultsDir)),
 );
 
 route("POST", "/api/v3/run", async (req, _url, ctx) => {
@@ -402,10 +396,13 @@ route("POST", "/api/v3/run", async (req, _url, ctx) => {
       navigate: Boolean(body.navigate),
       limit: body.limit ? Number(body.limit) : 0,
       runId: body.run_id ? String(body.run_id) : undefined,
-      runMode: body.run_mode === "test" || body.run_mode === "live" ? (body.run_mode as "live" | "test") : undefined,
+      runMode:
+        body.run_mode === "test" || body.run_mode === "live"
+          ? (body.run_mode as "live" | "test")
+          : undefined,
       effort: body.effort ? String(body.effort) : undefined,
       maxTurns: body.max_turns ? Number(body.max_turns) : undefined,
-      warmup: body.warmup === false ? false : true,
+      warmup: body.warmup !== false,
       framesDir: nodePath.join(ctx.resultsDir, "frames"),
     });
     return json({ ok: true, ...launched });
@@ -430,9 +427,7 @@ route("GET", "/api/v3/live/:id", (req, _url, ctx, p) => {
   const stream = new ReadableStream({
     start(controller) {
       const send = (event: string, data: unknown): void => {
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-        );
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
       send("hello", { run_id: p.id });
       const close = streamRun(ctx.resultsDir, p.id, send);
@@ -460,7 +455,7 @@ route("GET", "/api/v3/live/:id", (req, _url, ctx, p) => {
   });
 });
 
-route("GET", "/api/v3/frame", (req, url, ctx) => {
+route("GET", "/api/v3/frame", (_req, url, ctx) => {
   const h = url.searchParams.get("h") ?? "";
   if (!/^[0-9a-f]{16}$/.test(h)) return json({ error: "bad hash" }, { status: 400 });
   const p = nodePath.join(ctx.resultsDir, "frames", `${h}.png`);
@@ -475,21 +470,20 @@ route("GET", "/api/v3/frame", (req, url, ctx) => {
 route("GET", "/api/v3/integrity", (_req, _url, ctx) => {
   // Committed-artifact protection (v2's guard): which result files are
   // tracked by git. A live (real-model) run that is NOT tracked is at risk.
-  const proc = Bun.spawnSync([
-    "git", "-C", ctx.rootDir, "ls-files", "--", "results",
-  ]);
-  const tracked = new Set(
-    proc.stdout.toString().split("\n").filter(Boolean)
-  );
+  const proc = Bun.spawnSync(["git", "-C", ctx.rootDir, "ls-files", "--", "results"]);
+  const tracked = new Set(proc.stdout.toString().split("\n").filter(Boolean));
   const runs = enumerateRuns(ctx.resultsDir);
   const rows = Object.entries(runs).map(([rid, r]) => {
     const rel = nodePath.relative(ctx.rootDir, r.paths.summary ?? r.paths.jsonl);
-    const isTracked = tracked.has(rel) || tracked.has(nodePath.relative(ctx.rootDir, r.paths.jsonl));
+    const isTracked =
+      tracked.has(rel) || tracked.has(nodePath.relative(ctx.rootDir, r.paths.jsonl));
     return {
       run_id: rid,
       mode: r.summary?.mode ?? r.record?.mode ?? "?",
       tracked: isTracked,
-      note: isTracked ? "committed" : "not committed — a live run should be committed to be auditable",
+      note: isTracked
+        ? "committed"
+        : "not committed — a live run should be committed to be auditable",
     };
   });
   return json({ runs: rows, git_available: proc.exitCode === 0 });
@@ -514,7 +508,7 @@ function relativize(paths: Record<string, string>, ctx: BoardCtx): Record<string
 export function handleApi(
   req: Request,
   url: URL,
-  ctx: BoardCtx
+  ctx: BoardCtx,
 ): Promise<Response> | Response | null {
   const path = url.pathname;
   for (const r of routes) {

@@ -15,8 +15,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { PyRandom } from "./py";
 import { ROTATIONS, SILENT_PROB } from "./protocol";
+import { PyRandom } from "./py";
 
 export function scheduleSeed(runId: string, turn: number): number {
   const h = createHash("sha256").update(`${runId}:${turn}`).digest("hex");

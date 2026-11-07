@@ -7,10 +7,10 @@
  * through the filesystem it writes and SIGINT.
  */
 
-import type { Subprocess } from "bun";
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
-import { readStatus, runPaths, STATUS_STARTED } from "@drawtle/harness";
+import { STATUS_STARTED, readStatus, runPaths } from "@drawtle/harness";
+import type { Subprocess } from "bun";
 
 export interface Job {
   runId: string;
@@ -47,7 +47,7 @@ export interface LaunchSpec {
 export function launchRun(
   cliPath: string,
   resultsDir: string,
-  spec: LaunchSpec
+  spec: LaunchSpec,
 ): { run_id: string; cmd: string[] } {
   if (jobs.size >= 4) {
     throw new Error("refusing to start more than 4 concurrent runs");
@@ -99,14 +99,20 @@ export function launchRun(
   return { run_id: runId, cmd };
 }
 
-export function killRun(resultsDir: string, runId: string): {
+export function killRun(
+  resultsDir: string,
+  runId: string,
+): {
   stopped: boolean;
   note: string;
 } {
   const job = jobs.get(runId);
   if (job) {
     job.proc.kill("SIGINT");
-    return { stopped: true, note: "SIGINT sent; the run stops at the next boundary and records status=interrupted" };
+    return {
+      stopped: true,
+      note: "SIGINT sent; the run stops at the next boundary and records status=interrupted",
+    };
   }
   // Not one of ours (maybe started from a terminal). Ask the status file.
   const st = readStatus(resultsDir, runId);
@@ -123,7 +129,7 @@ export function killRun(resultsDir: string, runId: string): {
 export function streamRun(
   resultsDir: string,
   runId: string,
-  send: (event: string, data: unknown) => void
+  send: (event: string, data: unknown) => void,
 ): () => void {
   const paths = runPaths(resultsDir, runId);
   const jsonl = paths.jsonl;

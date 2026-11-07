@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as nodePath from "node:path";
-import { loadJson, RESULTS, expectDeepEqual } from "../../core/test/helpers";
+import { RESULTS, expectDeepEqual, loadJson } from "../../core/test/helpers";
 import { enumerateRuns, excludedRuns, leaderboard } from "../src/stats";
 
 const fix = loadJson<{
@@ -24,7 +24,10 @@ const fix = loadJson<{
 }>("runs_enumeration.json");
 
 function relativize(r: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...r };
+  const { statusSource, ...rest } = r as Record<string, unknown> & {
+    statusSource?: string;
+  };
+  const out: Record<string, unknown> = { ...rest };
   if (typeof out.paths === "object" && out.paths !== null) {
     const paths: Record<string, string> = {};
     for (const [k, v] of Object.entries(out.paths as Record<string, string>)) {
@@ -35,10 +38,8 @@ function relativize(r: Record<string, unknown>): Record<string, unknown> {
   if (typeof out.path === "string" && out.path.startsWith("/")) {
     out.path = nodePath.relative(RESULTS, out.path);
   }
-  const entry = r as { statusSource?: string };
-  if (entry.statusSource !== undefined) {
-    delete (out as Record<string, unknown>).statusSource;
-    out.status_source = entry.statusSource;
+  if (statusSource !== undefined) {
+    out.status_source = statusSource;
   }
   return out;
 }
@@ -61,12 +62,12 @@ describe("results-tree enumeration parity (v2 + v3 layouts, all runs)", () => {
     expectDeepEqual(
       leaderboard(RESULTS, { onlyClean: true, mode: "test" }),
       fix.leaderboard_test,
-      "lb-test"
+      "lb-test",
     );
     expectDeepEqual(
       leaderboard(RESULTS, { onlyClean: true, mode: "live" }),
       fix.leaderboard_live,
-      "lb-live"
+      "lb-live",
     );
   });
 

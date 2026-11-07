@@ -15,18 +15,18 @@
  */
 
 import {
-  Maze,
-  type Cell,
   type Action,
+  type Cell,
+  type Maze,
+  applyAction,
   distanceField,
   initialHeading,
-  optimalAction,
-  applyAction,
-  rotateWalls,
   mod360,
+  optimalAction,
+  rotateWalls,
 } from "./maze";
-import { orbitCamera, renderSvg, type Camera } from "./render";
 import { PyRandom } from "./py";
+import { type Camera, orbitCamera, renderSvg } from "./render";
 
 // Same camera the figures use, so a frame and a figure cannot disagree.
 export const CAM_AZ = -55.0;
@@ -48,7 +48,7 @@ export class Observation {
     public rotationDeg: number,
     public cell: Cell,
     public hiddenHeading: number | boolean,
-    public debug?: Record<string, unknown>
+    public debug?: Record<string, unknown>,
   ) {}
 }
 
@@ -79,7 +79,7 @@ export class StaleMazePolicy {
   history = new Map<number, Maze>();
   constructor(
     public base: Maze,
-    public lag: number
+    public lag: number,
   ) {}
   reset(entryCell: Cell, entryHeading: number): void {
     this.cell = entryCell;
@@ -88,8 +88,7 @@ export class StaleMazePolicy {
   }
   act(obs: Observation, trueHeading: number): Action | null {
     this.history.set(obs.turn, rotateWalls(this.base, obs.rotationDeg));
-    const src =
-      this.history.get(obs.turn - this.lag) ?? this.base;
+    const src = this.history.get(obs.turn - this.lag) ?? this.base;
     return optimalAction(src, this.cell, trueHeading, distanceField(src));
   }
 }
@@ -100,14 +99,14 @@ export class StaleHeadingPolicy {
   headHist = new Map<number, number>();
   constructor(
     public base: Maze,
-    public lag = 1
+    public lag = 1,
   ) {}
   reset(entryCell: Cell, entryHeading: number): void {
     this.cell = entryCell;
     this.heading = entryHeading;
     this.headHist = new Map([[0, entryHeading]]);
   }
-  act(obs: Observation, trueHeading: number): Action | null {
+  act(obs: Observation, _trueHeading: number): Action | null {
     const m = rotateWalls(this.base, obs.rotationDeg);
     const staleH = this.headHist.get(obs.turn - this.lag) ?? this.heading;
     const act = optimalAction(m, this.cell, staleH, distanceField(m));
@@ -131,15 +130,12 @@ export function progressScore(
   cell: Cell,
   trueHeading: number,
   dist: Map<string, number>,
-  action: Action | null
+  action: Action | null,
 ): boolean {
   if (action === null) return false;
   const [ncell] = applyAction(m, cell, trueHeading, action);
   if (cellKeyEq(ncell, cell)) return false; // stepped into a wall
-  return (
-    (dist.get(`${ncell[0]},${ncell[1]}`) ?? 1e9) <
-    (dist.get(`${cell[0]},${cell[1]}`) ?? 1e9)
-  );
+  return (dist.get(`${ncell[0]},${ncell[1]}`) ?? 1e9) < (dist.get(`${cell[0]},${cell[1]}`) ?? 1e9);
 }
 
 function cellKeyEq(a: Cell, b: Cell): boolean {
@@ -198,15 +194,9 @@ export class Episode {
       const dist = distanceField(m);
       const opt = optimalAction(m, this.cell, trueHeading, dist);
       const optCompass = opt ? opt[1] : null;
-      const svg = renderSvg(
-        m,
-        this.cell,
-        trueHeading,
-        0.0,
-        this.cam,
-        WALL_H,
-        { showHeading: false }
-      );
+      const svg = renderSvg(m, this.cell, trueHeading, 0.0, this.cam, WALL_H, {
+        showHeading: false,
+      });
       const obs = new Observation(t, svg, deg, this.cell, true, {
         true_heading: trueHeading,
         optimal_action: opt ? { turn: opt[0], step: opt[1] } : null,
@@ -259,7 +249,7 @@ export function runReference(
   policy: Policy,
   base: Maze,
   nTurns = 48,
-  seed: number | bigint = 0
+  seed: number | bigint = 0,
 ): EpisodeSummary {
   return summarise(new Episode(base, nTurns, seed).run(policy));
 }

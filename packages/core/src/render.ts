@@ -14,7 +14,7 @@
  * Verified byte-identical on the 800 frame hashes in fixtures/golden.
  */
 
-import { Maze, cellKey, type Cell } from "./maze";
+import type { Cell, Maze } from "./maze";
 import { pyFixed1, pyFloatStr } from "./py";
 
 // --------------------------------------------------------------- vector ---
@@ -64,13 +64,7 @@ export class Camera {
   w: number;
   h: number;
 
-  constructor(
-    pos: V3,
-    target: V3,
-    fov = 42.0,
-    width = 900,
-    height = 560
-  ) {
+  constructor(pos: V3, target: V3, fov = 42.0, width = 900, height = 560) {
     this.pos = pos;
     this.f = unit(sub(target, pos));
     this.r = unit(cross(this.f, [0.0, 0.0, 1.0]));
@@ -93,19 +87,10 @@ export class Camera {
   }
 }
 
-export function orbitCamera(
-  m: Maze,
-  azDeg: number,
-  dist: number,
-  height: number
-): Camera {
+export function orbitCamera(m: Maze, azDeg: number, dist: number, height: number): Camera {
   const [cx, cy] = m.centre();
   const a = pyRadians(azDeg);
-  const pos: V3 = [
-    cx + dist * Math.sin(a),
-    cy - dist * Math.cos(a),
-    height,
-  ];
+  const pos: V3 = [cx + dist * Math.sin(a), cy - dist * Math.cos(a), height];
   return new Camera(pos, [cx, cy, 0.0]);
 }
 
@@ -126,13 +111,7 @@ interface Quad {
   svg: string;
 }
 
-function quad(
-  cam: Camera,
-  corners: V3[],
-  fill: string,
-  stroke: string,
-  sw: number
-): Quad | null {
+function quad(cam: Camera, corners: V3[], fill: string, stroke: string, sw: number): Quad | null {
   const pts = corners.map((c) => cam.project(c));
   if (pts.some((p) => p === null)) return null;
   const ok = pts as Array<readonly [number, number, number]>;
@@ -159,7 +138,7 @@ export function renderSvg(
   worldDeg: number,
   cam: Camera,
   wallH = 0.7,
-  opts: RenderOpts = {}
+  opts: RenderOpts = {},
 ): string {
   const body = renderBody(m, cell, heading, worldDeg, cam, wallH, opts);
   return (
@@ -176,7 +155,7 @@ export function renderBody(
   worldDeg: number,
   cam: Camera,
   wallH = 0.7,
-  opts: RenderOpts = {}
+  opts: RenderOpts = {},
 ): string {
   const showGrid = opts.showGrid ?? false;
   const turtleScale = opts.turtleScale ?? 0.5;
@@ -197,13 +176,7 @@ export function renderBody(
   if (floorQ) parts.push({ depth: -1e9, svg: floorQ.svg });
 
   // exit and entry openings, drawn on the floor so they read as gaps.
-  const patch = (
-    cx: number,
-    cy: number,
-    half: number,
-    fill: string,
-    z: number
-  ): V3[] => [
+  const patch = (cx: number, cy: number, half: number, _fill: string, z: number): V3[] => [
     R([cx - half, cy - half, z]),
     R([cx + half, cy - half, z]),
     R([cx + half, cy + half, z]),
@@ -211,25 +184,13 @@ export function renderBody(
   ];
 
   for (const ex of m.exits) {
-    const q = quad(
-      cam,
-      patch(ex[0] + 0.5, ex[1] + 0.5, 0.42, EXIT, 0.005),
-      EXIT,
-      EXIT,
-      1.0
-    );
+    const q = quad(cam, patch(ex[0] + 0.5, ex[1] + 0.5, 0.42, EXIT, 0.005), EXIT, EXIT, 1.0);
     if (q) parts.push({ depth: 1e9, svg: q.svg });
   }
 
   {
     const e = m.entry;
-    const q = quad(
-      cam,
-      patch(e[0] + 0.5, e[1] + 0.5, 0.3, ENTRY, 0.004),
-      ENTRY,
-      ENTRY,
-      1.0
-    );
+    const q = quad(cam, patch(e[0] + 0.5, e[1] + 0.5, 0.3, ENTRY, 0.004), ENTRY, ENTRY, 1.0);
     if (q) parts.push({ depth: 1e9, svg: q.svg });
   }
 
@@ -241,7 +202,7 @@ export function renderBody(
       [R([x1, y1, 0.0]), R([x2, y2, 0.0]), R([x2, y2, wallH]), R([x1, y1, wallH])],
       WALL,
       WALL_EDGE,
-      0.8
+      0.8,
     );
     if (q) walls.push(q);
   }
@@ -307,10 +268,8 @@ export function screenPoint(
   m: Maze,
   cell: Cell,
   worldDeg: number,
-  z = 0.02
+  z = 0.02,
 ): readonly [number, number, number] | null {
   const centre = m.centre();
-  return cam.project(
-    rotateXY([cell[0] + 0.5, cell[1] + 0.5, z], centre, worldDeg)
-  );
+  return cam.project(rotateXY([cell[0] + 0.5, cell[1] + 0.5, z], centre, worldDeg));
 }

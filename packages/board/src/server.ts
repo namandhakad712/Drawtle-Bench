@@ -10,7 +10,7 @@
 
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
-import { handleApi, type BoardCtx } from "./api";
+import { type BoardCtx, handleApi } from "./api";
 import { launchRun } from "./supervisor";
 
 const HERE = nodePath.dirname(nodePath.resolve(import.meta.dir));
@@ -108,14 +108,19 @@ export function startBoard(opts: BoardOpts = {}): void {
 
       if (path === "/" || path === "/index.html") {
         return (
-          serveFile(nodePath.join(BOARD_ROOT, "public", "index.html"), "text/html; charset=utf-8") ??
-          new Response("missing index.html", { status: 500 })
+          serveFile(
+            nodePath.join(BOARD_ROOT, "public", "index.html"),
+            "text/html; charset=utf-8",
+          ) ?? new Response("missing index.html", { status: 500 })
         );
       }
       if (path === "/theme.css") {
         return (
-          serveFile(nodePath.join(BOARD_ROOT, "public", "theme.css"), "text/css; charset=utf-8", "no-cache") ??
-          new Response("missing theme.css", { status: 500 })
+          serveFile(
+            nodePath.join(BOARD_ROOT, "public", "theme.css"),
+            "text/css; charset=utf-8",
+            "no-cache",
+          ) ?? new Response("missing theme.css", { status: 500 })
         );
       }
       if (path.startsWith("/app/")) {
@@ -148,7 +153,9 @@ export function startBoard(opts: BoardOpts = {}): void {
   const url = `http://${server.hostname}:${server.port}/`;
   console.log(`drawtle control centre v3 — ${url}`);
   console.log(`  results: ${resultsDir}`);
-  console.log(`  bound to ${server.hostname} (local only; use DRAWTLE_BOARD_TOKEN to add a token gate)`);
+  console.log(
+    `  bound to ${server.hostname} (local only; use DRAWTLE_BOARD_TOKEN to add a token gate)`,
+  );
   if (opts.open !== false) {
     const opener =
       process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
