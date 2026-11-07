@@ -1,0 +1,5 @@
+{
+ "generator": "tools/parity/generate_golden.py",
+ "reference": "legacy/python-v2 @ frozen v2.9.0",
+ "note": "seeds are digit strings; read them as 64-bit integers"
+}

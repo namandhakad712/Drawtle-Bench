@@ -1,0 +1,17 @@
+{
+  "name": "@drawtle/board",
+  "version": "3.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/server.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@drawtle/core": "workspace:*",
+    "@drawtle/harness": "workspace:*",
+    "htm": "^3.1.0",
+    "preact": "^10.25.0"
+  }
+}

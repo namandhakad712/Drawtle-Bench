@@ -65,3 +65,21 @@ thinking-effort-loaded.json
 # One logs/<run_id>.log per supervisor job (recreatable; not an input).
 logs/
 results/*.log
+
+# ---- v3 (Bun platform) -----------------------------------------------------
+# Transient outputs of the golden-fixture generator: it reruns the frozen v2
+# scripts into the legacy tree and copies the numbers out.
+legacy/python-v2/results/
+legacy/python-v2/figures/
+# User-side state for the v3 control centre: keys, settings, provider overlay.
+# NEVER commit these -- configs/local/keys.json holds API keys.
+configs/local/
+# Response cache (content-addressed model-call replay) -- derived, like frames.
+results/response-cache/
+results/*/response-cache/
+# Node/Bun
+node_modules/
+bun.lockb.tmp
+# Coverage / tooling
+coverage/
+*.tsbuildinfo

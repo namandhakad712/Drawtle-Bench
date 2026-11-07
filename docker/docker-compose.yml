@@ -31,8 +31,7 @@ services:
     build:
       # `context` is resolved against the compose file's directory, so from
       # the repo root this must point one level UP (..) to reach the files the
-      # Dockerfile COPYs (drawtle/, web/, bench.py). Building from inside
-      # docker/ with `.` is a different thing and fails on `COPY bench.py`.
+      # v3 Dockerfile COPYs (packages/, registry/, configs/default.json).
       context: ..
       dockerfile: docker/Dockerfile
       # Host-uid parameterisation: bind mounts preserve host ownership, so an
@@ -73,8 +72,7 @@ services:
       - HTTPS_PROXY=http://egress-proxy:3128
       - HTTP_PROXY=http://egress-proxy:3128
       - NO_PROXY=localhost,127.0.0.1,egress-proxy
-      - PYTHONUNBUFFERED=1
-      # Marks the process as sandboxed so drawtle.sandbox.describe() can report
+      # Marks the process as sandboxed so the harness provenance can report
       # `level: docker` truthfully from inside the container rather than
       # inferring it from a Dockerfile that happens to exist in the repo.
       - DRAWTLE_IN_SANDBOX=1
@@ -90,8 +88,11 @@ services:
       - egress-proxy
     # Mock backend: needs no network. Verifies the image, the volumes, the
     # non-root user and the dataset path before any key is spent.
+    # v3 runs through the Bun CLI; the preset ladder lives in results/.
+    # Mock backend: needs no network. Verifies the image, the volumes, the
+    # non-root user and the dataset path before any key is spent.
     command: ["run", "--backend", "mock", "--model", "mock", "--mode", "optimal",
-              "--dataset", "results/dataset.json", "--out-dir", "results"]
+              "--dataset", "results/dataset-20.json", "--out-dir", "results"]
 
   egress-proxy:
     build:
