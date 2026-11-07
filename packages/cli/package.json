@@ -1,0 +1,19 @@
+{
+  "name": "@drawtle/cli",
+  "version": "3.0.0",
+  "type": "module",
+  "bin": {
+    "drawtle": "./src/index.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@drawtle/board": "workspace:*",
+    "@drawtle/core": "workspace:*",
+    "@drawtle/harness": "workspace:*"
+  }
+}

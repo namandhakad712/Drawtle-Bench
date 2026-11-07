@@ -332,6 +332,8 @@ export function solve(
   return { trace, final: [cell, heading] };
 }
 
+const _rotateCache = new WeakMap<Maze, Map<string, Maze>>();
+
 /**
  * A new maze whose wall structure is `m` rotated about the grid centre.
  * Cell indices are preserved, so the turtle can be left exactly where it
@@ -339,8 +341,26 @@ export function solve(
  *
  * `keepOpenings=true` rotates only the INTERIOR walls and leaves the exits
  * and entry in place (navigation mode's stable goal).
+ *
+ * Pure function: results are memoised per (base, deg, keepOpenings) — the
+ * reference policies and the episode loop ask for the same rotation twice
+ * per turn, and both must get the identical instance.
  */
 export function rotateWalls(m: Maze, deg: number, keepOpenings = false): Maze {
+  const key = `${deg}:${keepOpenings ? 1 : 0}`;
+  let inner = _rotateCache.get(m);
+  if (!inner) {
+    inner = new Map();
+    _rotateCache.set(m, inner);
+  }
+  const hit = inner.get(key);
+  if (hit) return hit;
+  const out = _rotateWallsImpl(m, deg, keepOpenings);
+  inner.set(key, out);
+  return out;
+}
+
+function _rotateWallsImpl(m: Maze, deg: number, keepOpenings: boolean): Maze {
   if (m.w !== m.h) throw new Error("rotate_walls needs a square grid");
   if (deg % 90 !== 0) throw new Error("rotate_walls needs a multiple of 90");
   const n = m.w;
