@@ -17,6 +17,7 @@ export function provenance(): Record<string, unknown> {
   const inContainer =
     existsSync("/.dockerenv") ||
     Boolean(process.env.DRAWTLE_SANDBOX) ||
+    Boolean(process.env.DRAWTLE_IN_SANDBOX) ||
     process.env.container !== undefined;
   const uid = typeof process.getuid === "function" ? process.getuid() : -1;
   if (inContainer) {

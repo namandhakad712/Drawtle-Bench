@@ -8,11 +8,6 @@ interface KeyRow {
   masked: string | null;
   source: string | null;
 }
-interface Check {
-  name: string;
-  ok: boolean;
-  detail: string;
-}
 
 export function System() {
   const [keys, setKeys] = useState<KeyRow[]>([]);
