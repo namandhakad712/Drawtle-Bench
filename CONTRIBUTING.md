@@ -8,7 +8,7 @@ fixtures must be regenerated and the change must say so.
 
 ```
 bun install                # once
-bun test packages          # 52 tests (~50k assertions) — includes all parity proofs
+bun test packages          # 67 tests (~50k assertions) — includes all parity proofs
 bunx tsc --noEmit          # typecheck
 bunx biome check .         # lint + format
 ```

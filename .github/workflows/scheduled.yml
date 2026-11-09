@@ -1,0 +1,62 @@
+name: scheduled-selfcheck
+
+# Sustainability: the instrument re-proves itself weekly, unattended.
+# Full CI + golden parity + levels drift + doctor. Any failure opens an
+# issue (never a silent red X), so a slow rot in the published numbers is
+# surfaced within a week even if nobody pushes.
+on:
+  schedule:
+    # weekly, Sunday 03:11 UTC
+    - cron: "11 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  selfcheck:
+    name: weekly self-check (CI + parity + levels + doctor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: bun install --frozen-lockfile
+      - name: typecheck + lint
+        run: |
+          bunx tsc --noEmit
+          bunx biome check .
+      - name: tests
+        run: bun test packages --timeout 60000
+      - name: golden parity (the frozen v2 reference)
+        run: python3 tools/parity/generate_golden.py --check
+      - name: levels drift gate
+        run: bun packages/cli/src/index.ts levels --check
+      - name: self-check (6 gates)
+        run: bun packages/cli/src/index.ts self-check
+      - name: doctor
+        run: bun packages/cli/src/index.ts doctor
+      - name: mock smoke run (the whole pipeline, free)
+        run: |
+          bun packages/cli/src/index.ts run --backend mock --model mock --mode optimal \
+            --dataset results/dataset-20.json --run-id weekly-smoke \
+            --out-dir /tmp/weekly-results
+          test -s /tmp/weekly-results/mock/weekly-smoke/events.jsonl
+      - name: open an issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `weekly self-check failed (${new Date().toISOString().slice(0, 10)})`,
+              body: `The scheduled self-check failed. The published numbers may be stale.\n\nRun: ${runUrl}\n\nReproduce locally: \`bun run ci\``,
+              labels: ["self-check", "bug"],
+            });

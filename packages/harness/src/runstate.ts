@@ -70,6 +70,7 @@ export const IN_DIR: Record<string, string> = {
   status: "status.json",
   checkpoint: "done.json",
   report: "report.html",
+  events: "events.jsonl",
 };
 
 export const FLAT_SUF: Record<string, string> = {
@@ -78,6 +79,7 @@ export const FLAT_SUF: Record<string, string> = {
   status: ".status.json",
   checkpoint: ".done.json",
   report: ".html",
+  events: ".events.jsonl",
 };
 
 export function runDir(outDir: string, model: string, runId: string): string {
