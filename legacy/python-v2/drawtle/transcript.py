@@ -68,9 +68,16 @@ from . import runstate as RS
 KEY_LEN = 16
 
 
-def content_key(content):
-    """Stable key for one message payload of any supported shape."""
-    blob = json.dumps(content, sort_keys=True, separators=(",", ":"))
+def content_key(content, role=None):
+    """Stable key for one message payload of any supported shape.
+
+    `role` is part of the key on purpose. Two messages with identical content
+    and different roles are distinct messages, and keying on content alone
+    collapsed them -- the pool's first-seen role won, and `replay_transcript`
+    could hand back an assistant reply as a user message. Roles are a closed
+    set, so this cannot split what should be one entry.
+    """
+    blob = json.dumps([role, content], sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode()).hexdigest()[:KEY_LEN]
 
 
@@ -100,15 +107,17 @@ class TranscriptPool:
     def add(self, message):
         """Pool one message; returns its key. Repeated content reuses the key."""
         content = message.get("content")
-        key = content_key(content)
+        role = message.get("role")
+        key = content_key(content, role)
         raw = len(json.dumps(content, sort_keys=True, separators=(",", ":")))
         self._bytes_in += raw
         ent = self.entries.get(key)
         if ent is None:
             # Store role alongside content: two messages can share a content
             # payload but differ in role, and collapsing them would silently
-            # change the conversation.
-            ent = {"content": content, "role": message.get("role"), "n": 0,
+            # change the conversation. The key now carries the role too, so a
+            # repeated payload under a different role gets its own entry.
+            ent = {"content": content, "role": role, "n": 0,
                    "sha256": _full_hash(content)}
             self.entries[key] = ent
         ent["n"] += 1

@@ -245,6 +245,11 @@ class ModelBackend:
         # in the registry with `price_known: true`.
         self.price_known = bool(self.info.get("price_known", False))
         self.priced = (self.price.get("in", 0) or self.price.get("out", 0)) > 0
+        # `cost_known` mirrors the above and is set by `_cost()` per call; it is
+        # initialised here so the attribute exists on a backend that has not
+        # answered anything yet -- a reader should not have to know that the
+        # field is a side effect of accounting.
+        self.cost_known = self.price_known or self.priced
         self.effort_field, self.effort_levels = (
             CAT.effort_supported(self.name, model) if CAT else (None, ()))
         if effort and not self.effort_field:
@@ -590,6 +595,28 @@ class OpenAIBackend(ModelBackend):
                              cached_tokens=cached, reasoning_tokens=rtoks)
 
 
+def _anthropic_block(block):
+    """Translate one content block to Anthropic's Messages-API shape.
+
+    The harness assembles requests in the OpenAI multimodal spelling
+    (LLMPolicy.act); Anthropic does not accept `image_url`. A data URI splits
+    into the media type and the payload, which is all the conversion is.
+
+    Unrecognised blocks pass through unchanged: this is a translation of what
+    the bench actually sends, not a general validator, and a block the harness
+    never emits costs nothing to check here.
+    """
+    if not isinstance(block, dict) or block.get("type") != "image_url":
+        return block
+    url = (block.get("image_url") or {}).get("url") or ""
+    if not isinstance(url, str) or "," not in url:
+        return block
+    head, _, data = url.partition(",")
+    media = head.split(";")[0].split(":", 1)[-1] or "image/png"
+    return {"type": "image", "source": {"type": "base64",
+                                        "media_type": media, "data": data}}
+
+
 class AnthropicBackend(ModelBackend):
     name = "anthropic"
     BASE = "https://api.anthropic.com/v1/messages"
@@ -597,7 +624,6 @@ class AnthropicBackend(ModelBackend):
 
     def __init__(self, model="claude-3-5-sonnet", api_key=None, **kw):
         super().__init__(model, api_key=api_key, **kw)
-
     def _post(self, messages, temperature=0.0, max_tokens=256, **kw):
         # Map openai-style messages to anthropic (system separate).
         sys_text = ""
@@ -609,15 +635,18 @@ class AnthropicBackend(ModelBackend):
                 turns.append({"role": m["role"], "content": m["content"]})
         body = {"model": self.model, "max_tokens": max_tokens,
                 "system": sys_text.strip(), "messages": turns}
-        # anthropic wants structured content blocks; rebuild the turns as blocks.
-        # An image, when there is one, already arrives as a block in the turn --
-        # see the note on the OpenAI-compatible `_post` for why there is no
-        # separate `image_b64` parameter here.
+        # anthropic wants structured content blocks; rebuild the turns as
+        # blocks. The harness sends OpenAI's multimodal spelling
+        # ({"type": "image_url", "image_url": {"url": "data:...;base64,..."}})
+        # -- see LLMPolicy.act -- which Anthropic's Messages API does not
+        # accept, so an image block is translated here rather than passed
+        # through. Anything the harness does not emit is left untouched.
         body["messages"] = [
             {"role": t["role"], "content": [
                 {"type": "text", "text": t["content"]}]}
             if not isinstance(t["content"], list)
-            else {"role": t["role"], "content": t["content"]}
+            else {"role": t["role"], "content": [_anthropic_block(b)
+                                                 for b in t["content"]]}
             for t in turns]
         self._last_prompt_text = sys_text + "\n".join(
             str(t.get("content", "")) for t in turns)

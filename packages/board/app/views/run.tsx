@@ -37,18 +37,27 @@ export function RunDetail(props: { runId: string }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [turns, setTurns] = useState<TurnRec[] | null>(null);
   const [episode, setEpisode] = useState<number | null>(null);
+  const [events, setEvents] = useState<{
+    total: number;
+    bad_lines: number;
+    events: Array<{ ts: string; event: string; severity: string; [k: string]: unknown }>;
+  } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     setDetail(null);
     setTurns(null);
     setEpisode(null);
+    setEvents(null);
     get<Detail>(`/api/v3/run/${encodeURIComponent(props.runId)}`)
       .then(setDetail)
       .catch((e) => setErr(String(e.message)));
     get<{ turns: TurnRec[] }>(`/api/v3/run/${encodeURIComponent(props.runId)}/turns`)
       .then((d) => setTurns(d.turns))
       .catch((e) => setErr(String(e.message)));
+    get<typeof events>(`/api/v3/run/${encodeURIComponent(props.runId)}/events?tail=120`)
+      .then(setEvents)
+      .catch(() => setEvents(null));
   }, [props.runId]);
 
   const episodes = useMemo(() => {
@@ -77,6 +86,19 @@ export function RunDetail(props: { runId: string }) {
     n: number;
     progress_rate: number | null;
   }>;
+  const byLevel = (s.by_level ?? []) as Array<{
+    level: number | null;
+    name: string;
+    diamond: boolean;
+    n: number;
+    progress_rate: number | null;
+    stale_rate: number | null;
+  }>;
+  const levelsMeta = (s.levels ?? null) as {
+    hash: string;
+    source: string;
+    selector: string;
+  } | null;
   const taxonomy = (s.error_taxonomy ?? {}) as Record<string, number>;
   const totalTurns = Object.values(taxonomy).reduce((a, b) => a + b, 0) || 1;
 
@@ -93,6 +115,22 @@ export function RunDetail(props: { runId: string }) {
       </div>
 
       ${detail.note ? H`<div class="card"><p class="hint">${detail.note}</p></div>` : null}
+
+      ${
+        byLevel.length
+          ? H`<div class="card">
+        <h2>By difficulty level <span class="sub">${levelsMeta ? `${levelsMeta.selector} slice · levels ${levelsMeta.hash} (${levelsMeta.source})` : "joined to the committed levels"}</span></h2>
+        <table class="tbl"><thead><tr><th>level</th><th class="num">n</th><th class="num">progress</th><th>rate</th><th class="num">stale</th></tr></thead>
+        <tbody>
+          ${byLevel.map(
+            (b) =>
+              H`<tr><td>${b.diamond ? H`<${Chip} tone="warn">◆ ${b.name}</${Chip}>` : b.name}</td><td class="num">${b.n}</td><td class="num">${fmt.pct(b.progress_rate)}</td><td><${Bar} value=${b.progress_rate} /></td><td class="num">${fmt.pct(b.stale_rate)}</td></tr>`,
+          )}
+        </tbody></table>
+        <p class="hint">The question this answers: does the model fall off on Frontier-tier mazes, or does it read every frame equally well?</p>
+      </div>`
+          : null
+      }
 
       <div class="grid cols-3">
         <div class="card">
@@ -123,6 +161,29 @@ export function RunDetail(props: { runId: string }) {
           <p class="hint">A model that answered nothing scores those turns as not-progressed (never dropped from the denominator) — invalid turns are first-class outcomes.</p>
         </div>
       </div>
+
+      ${
+        events
+          ? H`<div class="card">
+        <h2>Event log <span class="sub">${events.total} event(s) — lifecycle diagnostics (v3.1)</span></h2>
+        <div style=${{ maxHeight: 260, overflowY: "auto" }}>
+          ${events.events.map(
+            (e, i) => H`<div key=${i} class="mono hint" style=${{ marginBottom: "0.15rem" }}>
+              <span class="chip ${e.severity === "error" ? "bad" : e.severity === "warn" ? "warn" : "muted"}">${e.severity}</span>
+              ${e.ts} ${e.event} <span style=${{ opacity: 0.8 }}>${JSON.stringify(
+                Object.fromEntries(
+                  Object.entries(e).filter(
+                    ([k]) => !["ts", "run_id", "event", "severity"].includes(k),
+                  ),
+                ),
+              )}</span>
+            </div>`,
+          )}
+        </div>
+        ${events.bad_lines ? H`<p class="err">${events.bad_lines} malformed line(s) in the event log</p>` : null}
+      </div>`
+          : null
+      }
 
       <div class="card">
         <h2>Turn-by-turn replay <span class="sub">${shown?.length ?? 0} turn(s)${episode !== null ? ` · episode ${episode}` : ""}</span></h2>

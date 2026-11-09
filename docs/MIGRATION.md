@@ -74,7 +74,7 @@ command targets `results/dataset-20.json`.
 
 ## For developers
 
-- `bun install` once; `bun test packages` (52 tests), `bunx tsc --noEmit`,
+- `bun install` once; `bun test packages` (67 tests), `bunx tsc --noEmit`,
   `bunx biome check .`
 - the parity fixtures are data: regenerate with
   `python3 tools/parity/generate_golden.py` and commit the diff *in the

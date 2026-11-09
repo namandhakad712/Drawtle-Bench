@@ -11,6 +11,7 @@ export * from "./maze";
 export * from "./render";
 export * from "./protocol";
 export * from "./dataset";
+export * from "./levels";
 export * from "./parse";
 export * from "./stats";
 export * from "./semantics";

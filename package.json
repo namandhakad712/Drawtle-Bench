@@ -1,6 +1,6 @@
 {
   "name": "drawtle-bench",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
   "workspaces": ["packages/*"],
@@ -14,7 +14,7 @@
     "board": "bun packages/board/src/server.ts",
     "golden": "python3 tools/parity/generate_golden.py --check",
     "golden:regen": "python3 tools/parity/generate_golden.py",
-    "ci": "bun run typecheck && bun run lint && bun test packages --timeout 60000 && bun run golden"
+    "ci": "bun run typecheck && bun run lint && bun test packages --timeout 60000 && bun packages/cli/src/index.ts levels --check && bun packages/cli/src/index.ts self-check && bun run golden"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
