@@ -190,13 +190,44 @@ def run_paths(out_dir, run_id, model=None):
     pass (the run does not exist yet, so it cannot be discovered). Without it
     the layout already on disk is resolved, which is what a reader wants and
     what keeps every existing call site correct.
+
+    A run id is a path component, so a WRITER is refused an id the delete path
+    already rejects: `../../pwned` would write the run's sidecars outside the
+    results tree and leave a run no reader, resume or delete can find. Readers
+    keep tolerating legacy ids (a run written before this guard exists is
+    still on disk and still readable); the guard only stops new writes. Use
+    `validate_run_id` to get the reason string for an error message.
     """
+    if model and not _SAFE_RUN_ID.match(str(run_id or "")):
+        raise ValueError(f"unsafe run_id {str(run_id)!r}: must be a plain name "
+                         f"(letters, digits, dot, dash, underscore) with no "
+                         f"path separators")
     if model:
         return dir_paths(run_dir(out_dir, model, run_id))
     d = find_run_dir(out_dir, run_id)
     if d:
         return dir_paths(d)
     return flat_paths(out_dir, run_id)
+
+
+def validate_run_id(run_id):
+    """`(ok, reason)`. The one place the run-id contract is spelled out.
+
+    The id reaches `os.path.join` in several places, so an id containing a path
+    separator can write a run's artifacts outside the results tree -- where
+    `find_run_dir` cannot find them, so the run becomes invisible to every
+    reader while still existing on disk as a completed (possibly paid) run.
+    The default id embeds the model name, and the registry deliberately holds
+    ids containing '/' ("IFM/K2-Horizon-375B-A23B"), so this can happen with no
+    operator input at all.
+    """
+    if not run_id:
+        return False, "run_id is empty"
+    rid = str(run_id)
+    if not _SAFE_RUN_ID.match(rid):
+        return False, ("run_id must be a plain name (letters, digits, dot, "
+                       "dash, underscore) with no path separators")
+    return True, ""
 
 
 def layout_of(out_dir, run_id):

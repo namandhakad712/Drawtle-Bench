@@ -46,9 +46,17 @@ export interface PoolBlob {
   stats: PoolStats | null;
 }
 
-/** Stable key for one message payload of any supported shape. */
-export function contentKey(content: Content): string {
-  const blob = pyCanonicalDumps(content);
+/** Stable key for one message payload of any supported shape.
+ *
+ * `role` is part of the key on purpose. Two messages with identical content
+ * and different roles are distinct messages, and keying on content alone
+ * collapsed them — the pool's first-seen role won, and `replayTranscript`
+ * could hand back an assistant reply as a user message. Roles are a closed
+ * set, so this cannot split what should be one entry. (Port of the v2 E9
+ * fix; the Python reference behaves identically.)
+ */
+export function contentKey(content: Content, role: string | null = null): string {
+  const blob = pyCanonicalDumps([role, content]);
   return createHash("sha256").update(blob, "utf8").digest("hex").slice(0, KEY_LEN);
 }
 
@@ -64,12 +72,17 @@ export class TranscriptPool {
 
   add(message: { role?: string; content: unknown }): string {
     const content = message.content as Content;
-    const key = contentKey(content);
+    const role = message.role ?? null;
+    const key = contentKey(content, role);
     const raw = pyCanonicalDumps(content);
     this.bytesIn += raw.length;
     let ent = this.entries[key];
     if (ent === undefined) {
-      ent = { content, role: message.role ?? null, n: 0, sha256: fullHash(content) };
+      // Store role alongside content: two messages can share a content
+      // payload but differ in role, and collapsing them would silently
+      // change the conversation. The key carries the role too, so a repeated
+      // payload under a different role gets its own entry.
+      ent = { content, role, n: 0, sha256: fullHash(content) };
       this.entries[key] = ent;
     }
     ent.n += 1;

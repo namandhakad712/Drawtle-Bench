@@ -423,6 +423,33 @@ def gen_mock_exchange(fix):
     return out
 
 
+def gen_schedule(fix):
+    """The fixed rotation schedule (E1), straight from the fixed Runner.
+
+    v2 pre-fix drew each turn's rotation from a seed built on the built-in
+    hash() of the run_id — randomised per process, so no fixture could pin
+    it and no two machines agreed. The E1 fix derives the seed from a stable
+    SHA-256 digest, which is exactly what the v3 schedule.ts implements
+    independently. This fixture proves the two implementations agree
+    turn-for-turn on real run_ids — cross-language parity for the fix.
+    """
+    run_ids = [
+        "run-agnes-3.0-flash-1790016674",
+        "run-parity-schedule-b",
+        "ci-opt",
+    ]
+    out = {}
+    for rid in run_ids:
+        # _schedule reads only run_id and the per-instance cache; construct
+        # the minimum state rather than a full Runner (which needs a manifest,
+        # backends and directories the fixture does not care about).
+        r = RUN.Runner.__new__(RUN.Runner)
+        r.run_id = rid
+        r._sched = {}
+        out[rid] = [r._schedule(t) for t in range(48)]
+    return out
+
+
 def gen_semantics(fix):
     env = dict(os.environ, PYTHONHASHSEED="0")
     # The script writes into <legacy>/results/, which does not exist in a
@@ -485,6 +512,7 @@ def run(fix):
         "stats_aggregate": gen_stats_aggregate(fix),
         "runs_enumeration": gen_runs_enumeration(fix),
         "transcript": gen_transcript(fix),
+        "schedule": gen_schedule(fix),
         "mock_exchange": gen_mock_exchange(fix),
         "semantics": gen_semantics(fix),
     }
