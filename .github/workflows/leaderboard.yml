@@ -39,10 +39,12 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
-      - name: verify the levels and reference before publishing
+      - name: verify the levels, the artifacts and the reference before publishing
         run: |
           bun packages/cli/src/index.ts levels --check
           bun packages/cli/src/index.ts self-check
+          # v3.2: nothing ranks until it re-derives from its own log
+          bun packages/cli/src/index.ts validate --all
       - name: render the leaderboard (all levels + diamond view)
         run: |
           bun packages/cli/src/index.ts leaderboard --publish-out public/
