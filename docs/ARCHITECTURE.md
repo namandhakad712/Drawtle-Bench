@@ -45,7 +45,7 @@ compute identically — or explicitly declare itself a new benchmark.
 3. CI regenerates into a temp dir and diffs; any drift in the legacy code,
    the committed fixtures, the committed results/ artifacts or the
    published MDI fails the build.
-4. The Bun test suite (67 tests) asserts the TypeScript port reproduces
+4. The Bun test suite (98 tests) asserts the TypeScript port reproduces
    every fixture bit-exactly.
 
 The hard parts were not algorithms; they were CPython behaviours ECMAScript

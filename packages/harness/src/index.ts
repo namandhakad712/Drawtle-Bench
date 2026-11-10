@@ -11,6 +11,7 @@ export * from "./responseCache";
 export * from "./frames";
 export * from "./sandbox";
 export * from "./eventlog";
+export * from "./validator";
 export {
   DEFAULTS as SETTINGS_DEFAULTS,
   describe as describeSettings,

@@ -41,12 +41,17 @@ jobs:
         run: bun packages/cli/src/index.ts self-check
       - name: doctor
         run: bun packages/cli/src/index.ts doctor
-      - name: mock smoke run (the whole pipeline, free)
+      - name: mock smoke run (the whole pipeline, free) + rigorous validation of it
         run: |
           bun packages/cli/src/index.ts run --backend mock --model mock --mode optimal \
             --dataset results/dataset-20.json --run-id weekly-smoke \
             --out-dir /tmp/weekly-results
           test -s /tmp/weekly-results/mock/weekly-smoke/events.jsonl
+          # v3.2: the smoke run must survive its own submission gate — the
+          # weekly workflow eats its own dog food
+          bun packages/cli/src/index.ts validate --dir /tmp/weekly-results --run weekly-smoke
+      - name: submission gate (every committed run)
+        run: bun packages/cli/src/index.ts validate --all
       - name: open an issue on failure
         if: failure()
         uses: actions/github-script@v7
