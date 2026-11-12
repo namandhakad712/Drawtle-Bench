@@ -120,3 +120,100 @@ The survey also confirmed several strengths:
 - **Excluded runs are never ranked.** The failed agnes run is excluded from the leaderboard and cannot be misclassified as unfinished.
 - **98.4 % rigid-rotation invariance** and the floor gate's inability to detect structural independence are documented caveats in `README.md` and `PAPER.md` §7.1. They are **not** bugs.
 - **No secrets or credentials were found** in the audited code paths. Key material is read from environment variables or `configs/.env` and never logged.
+---
+
+# v3.2.1 Addendum — The 26 Findings Re-Audited Against the v3 Tree (2026-11-12)
+
+The findings above were filed against the v2 tree (HEAD v2.8.4). The v3
+rewrite (Bun + TypeScript) replaced most of the code they pointed at, but
+nobody had systematically re-verified which findings actually died with v2
+and which survived into v3. This addendum closes that loop: every finding
+re-checked against the v3 tree at `master` (`b3df70d`), evidence cited.
+
+## Verdict table
+
+| # | v2 finding | v3 status | Evidence in the v3 tree |
+|---|---|---|---|
+| C1 | Egress proxy 30 s hard idle cap | **fixed in v2.8.4, carried into v3** | `docker/egress_proxy.py:120-124` — `EGRESS_IDLE_TIMEOUT_S` env, default 600 s |
+| C2 | Retry loop misses `RemoteDisconnected` | **fixed in v2.8.4, redesigned in v3** | `packages/harness/src/backends.ts:162` — a `TransientError` class covers transport, timeout and non-JSON bodies; `AbortError` retried too |
+| H1 | `max_tokens_per_episode` never enforced | **fixed** | `packages/harness/src/runner.ts` — the turn loop breaks when `epTokens >= maxTokens`; summary records `token_cap_hit` |
+| H2 | Retry misses decode errors | **fixed** | `backends.ts:429-431` — a non-JSON body throws `TransientError` and is retried |
+| H3 | Failed runs produce no summary | **fixed** | `packages/cli/src/index.ts:401` — the error path writes a partial summary; `aggregate()` reads the JSONL directly |
+| H4 | agnes-3.0-flash missing `image_in` | **was STILL OPEN — fixed in v3.2.1** | see below |
+| M1 | UID 1000 hardcoded in Docker | **fixed** | `docker/Dockerfile:19`, `docker-compose.yml:41-43` — `ARG UID` / `${UID:-1000}` |
+| M2 | `fetch_models` has no deadline | **fixed** | `catalog.ts` — `AbortController` + 20 s timer on the discovery fetch |
+| M3 | `save_summary` non-atomic | **fixed** | `measures.ts:150-151` — `saveSummary` routes through `atomicWriteJson` (temp + rename + fsync) |
+| M4 | Docker env passthrough: 4 of 20+ providers | **fixed** | `docker-compose.yml` passes 21 provider keys |
+| M5 | `bench.py` never loads `configs/.env` | **obsolete — redesigned away** | v3 has no `.env` at all; keys live in `configs/local/keys.json` (gitignored) via `drawtle key set`, consumed by every entry point through one catalog |
+| M6 | `run_dataset` leaves `status=started` | **fixed** | `runner.ts` error path — `markFinished(..., STATUS_ERROR, ...)` with resume hints; interrupted runs get `interrupted` status |
+| M7 | `report` crashes on failed runs | **fixed** | `cmdReport` falls back to `aggregate(jsonl)` when no `summary.json` exists |
+| M8 | BOOT state XSS | **fixed by rebuild** | `board` is zero-build Preact; server comment: "no innerHTML anywhere" |
+| M9 | `_TRACKED_CACHE` never invalidated | **obsolete — redesigned away** | v3 server has no git-tracked-artifact cache |
+| M10 | Replay view injection | **fixed by rebuild** | Preact escapes all rendered input |
+| M11 | Stale Docker documentation | **fixed** | README carries no "not installed here" / "never executed" claims |
+| M12 | No auth on the control centre | **fixed** | `board/src/server.ts:86` — `DRAWTLE_BOARD_TOKEN` gate on everything but the shell; default localhost binding |
+| L1 | `supervisor.reap()` dead code | **obsolete** | v3 supervisor has no `reap` |
+| L2 | CLI imports web stack at module load | **fixed** | `packages/cli/src/index.ts` imports core + harness only; the board is a separate process |
+| L3 | `store_key` lacks fsync | **fixed** | `catalog.ts:213` — `fsyncSync` before the replace |
+| L4 | Resume trusts `done.json` blindly | **fixed** | `runner.ts` — resume refuses a checkpoint whose `datasetHash` differs from the manifest's |
+| L5 | CI lacks lint/type/packaging | **fixed** | `bun run ci`: typecheck → lint (biome) → test → levels → self-check → validate --all → doctor → golden parity |
+| L6 | No release workflow | **fixed** | tags v3.0.0 / v3.1.0 / v3.2.0 with a GitHub Release each; `scripts/make_releases.py` is idempotent |
+| L7 | Unpinned optional deps | **obsolete** | v3 has no cairosvg/playwright; the rasteriser is resvg, the board needs no browser driver |
+| L8 | No `--no-vision` CLI flag | **was STILL OPEN (transposed) — fixed in v3.2.1** | see below |
+
+Score: 23 of 26 dead in v2 or fixed by the v3 rebuild; **2 survived and are
+fixed in v3.2.1** (H4, L8); 1 (M5) was designed away entirely.
+
+## H4, closed with evidence
+
+The v3 registry still listed `agnes-3.0-flash` capabilities as
+`["thinking","tool_use"]` — no `image_in` — while the committed run
+`run-agnes-3.0-flash-1790016674` sent the model rasterised frames on
+**148/148 model turns** (its 9 other records are `'arrived'` terminal
+markers with no model call). The understated list was not cosmetic:
+`Runner.contextTurnCap()` sized the context-window turn estimate from the
+registry's capabilities, so a vision run of this model was charged the
+text-only estimate and could overrun its window mid-episode.
+
+The fix (v3.2.1):
+
+1. **Registry** (`registry/models.json` + the byte-identical frozen copy
+   `legacy/python-v2/drawtle/model_registry.json`): `image_in` added,
+   `capability_source: "run_evidence"`, notes carry the evidence.
+2. **`contextTurnCap()` now follows the run's own modality**
+   (`this.vision && this.frameDir`), not the registry list: a vision run is
+   always sized by the image estimate, a text run is never charged for
+   images it does not attach. Registry lag can no longer silently re-cap a
+   run mid-flight.
+3. The Runner constructor rejects `vision=true` without a `frameDir` for
+   real backends (a run must not claim vision while sending text).
+
+Regression-tested in `packages/harness/test/e2e.test.ts` ("v3.2.1
+BETTERMENT follow-ups"): the registry assertion, the modality-scoped cap
+(text run gets strictly more headroom than the same model's vision run),
+and the vision-contract test (model turns carry frame hashes; bookkeeping
+rows never do).
+
+## L8, closed as `--text`
+
+v2's fix suggestion was a `--no-vision` flag; v3 transposed the gap: the
+harness always supported `vision=false` (the blind text baseline — the
+system prompt explicitly says no maze imagery is provided), but the CLI
+demanded `--frames` for every non-mock backend, so the control experiment
+("same model, same mazes, no imagery") could not be launched at all.
+
+`drawtle run --text` now runs it: no image is attached on any turn, turn
+records carry `frame_hash=""` (the model saw nothing, and the record says
+so), the `run_started` event stamps `vision:false` / `frames:null`, and the
+CLI prints the modality up front. `--text` and `--frames` are mutually
+exclusive. The e2e test drives a full text run end to end — zero image
+parts ever reach the backend, the text system prompt is the one used, and
+the run aggregates as a first-class result.
+
+## What this addendum does not change
+
+The parity-locked measurement core is untouched: golden fixtures
+byte-identical, all 98 v3.2 tests still pass (102 with this release's four
+new ones), `validate --all` green on every committed run, and the frozen v2
+tree keeps its byte-identical registry copy so the E-port parity suite
+still holds.
