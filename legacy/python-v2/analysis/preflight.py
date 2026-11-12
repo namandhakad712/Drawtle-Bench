@@ -217,7 +217,10 @@ def main():
         print("         were estimated locally. A run against it will report "
               "token_source=")
         print(f"         {src!r} and its cost must be read as an estimate.")
-    known = getattr(backend, "price_known", False) or getattr(backend, "priced", False)
+    # Preflight and the run path read the SAME attribute: `cost_known`, set in
+    # `ModelBackend.__init__` and updated by accounting. Re-deriving it from
+    # `price_known`/`priced` here used to let the two disagree about one model.
+    known = getattr(backend, "cost_known", False)
     if not known:
         print(f"{WARN}no price for {model}: cost will be reported as UNKNOWN "
               f"(not $0).")

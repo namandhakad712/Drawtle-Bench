@@ -178,6 +178,15 @@ def cmd_run(a):
               "filesystem or network isolation. See docker/sandbox.md")
 
     reveal = (a.backend == "mock") or a.reveal_optimal
+    if a.run_id:
+        # Validated here, before the Runner is built, so a bad id is a clear
+        # CLI error rather than a run that writes its sidecars outside the
+        # results tree and becomes invisible to every reader. Same rule the
+        # Runner itself enforces; spelled out here so the message names the
+        # flag the operator typed.
+        ok, why = RS.validate_run_id(a.run_id)
+        if not ok:
+            raise SystemExit(f"--run-id {a.run_id!r} is not usable: {why}")
     pool = TR.load_pool(a.out_dir, a.run_id) if (a.resume and a.run_id) else None
     runner = RUN.Runner(backend, config=config, reveal_optimal=reveal,
                         frame_dir=a.frames, run_id=a.run_id, navigate=a.navigate,
