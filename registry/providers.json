@@ -380,6 +380,20 @@
       "context_note": "Serves the K2 family. Model ids contain a literal `/` (`IFM/K2-Horizon-375B-A23B`), so the id has a path separator in it -- safe here because this registry never parses a model id into parts, it passes it through. No key is present for this provider; it will report as unconfigured until one is stored.",
       "self_hosted": false,
       "rate_limit": null
+    },
+
+    "zai": {
+      "protocol": "zai-sdk",
+      "url": null,
+      "key_env": [],
+      "models_url": null,
+      "models_path": null,
+      "auth": "sdk-config",
+      "openai_compat": false,
+      "usage_fields": [["prompt_tokens"], ["completion_tokens"]],
+      "context_note": "The z-ai-web-dev-sdk (public on npm, 0.0.18) drives the harness's own sandbox environment. Not an HTTP endpoint: ZAI.create() reads the sandbox's configured credentials, so no key_env is consulted. CRITICAL ROUTING FACT, probed 2026-11-14: the service routes by ENDPOINT, not by model name. completions.create serves glm-4-plus for ANY model value (including nonsense strings); completions.createVision serves glm-5.3-flash for ANY model value. The model field in the request is ignored -- which is why the harness has a dedicated ZaiBackend that pins the served model per lane and refuses any other --model, rather than letting a run be mislabeled (the H4 lesson). Responses are OpenAI-shaped (choices[0].message.content, usage with prompt/completion tokens and prompt_tokens_details.cached_tokens / completion_tokens_details.reasoning_tokens), so tokens are measured. No pricing is published for the sandbox service: cost is reported as unknown (measured tokens, unknown price). Rate limits ARE real: a burst of six calls hit 429 'Too many requests' within seconds, so the transport's exponential backoff matters; SDK errors carry 'status 429' in the message text and ZaiBackend translates them onto the retry ladder. thinking:{type:'disabled'} is sent on every request.",
+      "self_hosted": false,
+      "rate_limit": "unpublished; 429s observed under burst (2026-11-14)"
     }
   }
 }

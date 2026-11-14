@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "drawtle-bench",
+      "dependencies": {
+        "z-ai-web-dev-sdk": "0.0.18",
+      },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
         "@types/bun": "^1.2.14",
@@ -12,7 +15,7 @@
     },
     "packages/board": {
       "name": "@drawtle/board",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@drawtle/core": "workspace:*",
         "@drawtle/harness": "workspace:*",
@@ -22,7 +25,7 @@
     },
     "packages/cli": {
       "name": "@drawtle/cli",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "bin": {
         "drawtle": "./src/index.ts",
       },
@@ -34,11 +37,11 @@
     },
     "packages/core": {
       "name": "@drawtle/core",
-      "version": "3.0.0",
+      "version": "3.1.0",
     },
     "packages/harness": {
       "name": "@drawtle/harness",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@drawtle/core": "workspace:*",
         "@resvg/resvg-js": "^2.6.2",
@@ -111,6 +114,8 @@
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "undici-types": ["undici-types@8.12.4", "", {}, "sha512-GNCQH3MbVGB8OAVAoTiLH8pu4wx5Ni3DWKpnBzGj3WDsi8EwmK0aOVBooNEt+g5YL1eHPxcS9XUTouwFU6j1kQ=="],
+
+    "z-ai-web-dev-sdk": ["z-ai-web-dev-sdk@0.0.18", "", { "bin": { "z-ai": "dist/cli.js", "z-ai-generate": "dist/cli.js" } }, "sha512-xVoZIEME2F+/Z06orHCgUKzOMuFPhoHuzN4ZFZqcD71g11nzbzq2jKSP53igi3lJFE8ZbMB4WKb4gp6lCGrMXQ=="],
 
     "@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
   }

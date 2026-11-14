@@ -852,11 +852,164 @@ export class GenericOpenAIBackend extends OpenAIBackend {
   }
 }
 
+// ------------------------------------------------------------------- zai ---
+// The z-ai sandbox backend: the harness's own environment provider, driven by
+// the z-ai-web-dev-sdk (public on npm). Unlike every other backend here, it
+// does not speak HTTP directly: ZAI.create() reads the sandbox's configured
+// credentials, and the SDK offers TWO endpoints — completions.create (text,
+// no image parts possible) and completions.createVision (image parts). The
+// service also ROUTES BY ENDPOINT, not by model name: probes on 2026-11-14
+// showed `create` serves glm-4-plus and `createVision` serves glm-5.3-flash
+// for ANY `model` value, so this backend pins the served model per lane and
+// refuses a --model that would misreport what was measured.
+
+const ZAI_TEXT_SERVED = "glm-4-plus";
+const ZAI_VISION_SERVED = "glm-5.3-flash";
+
+export class ZaiBackend extends ModelBackend {
+  name = "zai";
+  override keyEnv: string[] = []; // creds live in the SDK's config, not env
+  private zai: unknown = null;
+  private initPromise: Promise<unknown> | null = null;
+
+  /** Map SDK failures onto the retry ladder in complete(): the SDK throws
+   * plain Errors carrying "status 429"/"status 5xx" text, which would not be
+   * retried otherwise. */
+  private translate(e: unknown): Error {
+    const msg = e instanceof Error ? e.message : String(e);
+    const m = msg.match(/status (\d{3})/);
+    if (m) {
+      const status = Number(m[1]);
+      return new HttpStatusError(status, null, msg.slice(0, 300));
+    }
+    return new TransientError(msg);
+  }
+
+  private async client(): Promise<unknown> {
+    if (this.zai) return this.zai;
+    if (this.initPromise === null) {
+      const mod = (await import("z-ai-web-dev-sdk")) as { default?: unknown } & Record<
+        string,
+        unknown
+      >;
+      const ZAI = (mod.default ?? mod) as { create(): Promise<unknown> };
+      this.initPromise = ZAI.create();
+    }
+    this.zai = await this.initPromise;
+    return this.zai;
+  }
+
+  constructor(
+    model: string,
+    opts: ConstructorParameters<typeof ModelBackend>[1] & { apiKey?: string | null } = {},
+  ) {
+    super(model, opts);
+    const known = [ZAI_TEXT_SERVED, ZAI_VISION_SERVED];
+    if (!known.includes(model)) {
+      throw new Error(
+        `backend 'zai' serves exactly ${known.join(" / ")} (verified by probe 2026-11-14; the API's model field is ignored — text requests are served by ${ZAI_TEXT_SERVED}, vision requests by ${ZAI_VISION_SERVED}). Pass --model ${known.join(" or --model ")}.`,
+      );
+    }
+  }
+
+  /** True when the message list carries image parts (needs createVision). */
+  private hasImage(messages: Message[]): boolean {
+    return messages.some(
+      (m) =>
+        typeof m.content !== "string" &&
+        (m.content as Array<Record<string, unknown>>).some(
+          (p) => typeof p === "object" && p !== null && p.type === "image_url",
+        ),
+    );
+  }
+
+  protected async post(
+    messages: Message[],
+    opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
+    _signal: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    const client = (await this.client()) as {
+      chat: {
+        completions: {
+          create: (b: Record<string, unknown>) => Promise<Record<string, unknown>>;
+          createVision: (b: Record<string, unknown>) => Promise<Record<string, unknown>>;
+        };
+      };
+    };
+    const vision = this.hasImage(messages);
+    // The service ignores the model field, but the request still needs one
+    // for createVision; send the lane's served model so the wire log and the
+    // registry agree on what answered.
+    const body: Record<string, unknown> = {
+      model: vision ? ZAI_VISION_SERVED : ZAI_TEXT_SERVED,
+      messages,
+      thinking: { type: "disabled" },
+      temperature: opts.temperature,
+      max_tokens: opts.maxTokens,
+      ...opts.extra,
+    };
+    this.lastPromptText = messages.map(messageText).join("\n");
+    let payload: Record<string, unknown>;
+    try {
+      payload = vision
+        ? await client.chat.completions.createVision(body)
+        : await client.chat.completions.create(body);
+    } catch (e) {
+      throw this.translate(e);
+    }
+    // Honesty gate: if the service ever starts honouring model names (or
+    // reroutes), say so loudly instead of silently mislabeling the run.
+    // Outside the translate() catch — a labelling fault must fail the run
+    // immediately, never ride the retry ladder.
+    const served = typeof payload.model === "string" ? payload.model : null;
+    const expected = vision ? ZAI_VISION_SERVED : ZAI_TEXT_SERVED;
+    if (served && served !== expected) {
+      throw new Error(
+        `zai served '${served}' on the ${vision ? "vision" : "text"} lane but this backend records '${expected}'; update ZAI_*_SERVED in backends.ts`,
+      );
+    }
+    return payload;
+  }
+
+  protected wrap(payload: Record<string, unknown>, latencyS: number): ModelResponse {
+    const choices = (payload.choices ?? []) as Array<Record<string, unknown>>;
+    const msg = (choices[0]?.message ?? {}) as Record<string, unknown>;
+    let ch = msg.content ?? "";
+    if (Array.isArray(ch)) {
+      ch = (ch as Array<Record<string, unknown>>)
+        .filter((b) => typeof b === "object")
+        .map((b) => String(b.text ?? ""))
+        .join("");
+    }
+    const reasoning = String(msg.reasoning_content ?? msg.reasoning ?? "");
+    const { pin, pout, source } = resolveUsage(
+      payload.usage as Record<string, unknown> | undefined,
+      this.lastPromptText,
+      String(ch),
+    );
+    const { cached, reasoning: rtok } = usageDetails(payload.usage as Record<string, unknown>);
+    const c = this.cost(pin, pout);
+    return makeResponse({
+      text: String(ch),
+      promptTokens: pin,
+      completionTokens: pout,
+      costUsd: c.usd,
+      latencyS,
+      tokenSource: source,
+      costKnown: c.known,
+      raw: payload,
+      reasoning,
+      cachedTokens: cached,
+      reasoningTokens: rtok,
+    });
+  }
+}
+
 // ---------------------------------------------------------------- factory --
 
 export function knownBackends(): string[] {
   return Array.from(
-    new Set(["mock", "openai", "anthropic", "gemini", ...Object.keys(providers())]),
+    new Set(["mock", "openai", "anthropic", "gemini", "zai", ...Object.keys(providers())]),
   ).sort();
 }
 
@@ -869,6 +1022,7 @@ export function makeBackend(
   if (kind === "openai") return new OpenAIBackend(model, opts as never);
   if (kind === "anthropic") return new AnthropicBackend(model, opts as never);
   if (kind === "gemini") return new GeminiBackend(model, opts as never);
+  if (kind === "zai") return new ZaiBackend(model, opts as never);
   if (providerSpec(kind)) {
     return new GenericOpenAIBackend(model, kind, opts as never);
   }
@@ -880,6 +1034,7 @@ export function backendKeyEnv(kind: string): string[] {
   if (kind === "openai") return ["OPENAI_API_KEY"];
   if (kind === "anthropic") return ["ANTHROPIC_API_KEY"];
   if (kind === "gemini") return ["GEMINI_API_KEY", "GOOGLE_API_KEY"];
+  if (kind === "zai") return []; // the SDK holds its own sandbox credentials
   return providerSpec(kind)?.key_env ?? [];
 }
 

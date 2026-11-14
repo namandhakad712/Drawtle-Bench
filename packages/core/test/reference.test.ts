@@ -70,6 +70,9 @@ describe("reference-policy parity (7 policies x 40 seeds x 48 turns)", () => {
     return new StaleHeadingPolicy(base, Number(label.split("=")[1]));
   };
 
+  // 7 policies x 40 seeds x 48 turns: ~13s on a slow box, so the test
+  // declares its own budget instead of leaning on bun's 5s default (which
+  // made it fail on any machine slower than CI's).
   test("progress/hit-wall/silent rates reproduce run_bench exactly", () => {
     const recomputed = [];
     for (const row of refFix.rows) {
@@ -106,7 +109,7 @@ describe("reference-policy parity (7 policies x 40 seeds x 48 turns)", () => {
     // and the headline claims now current in the repo
     expect(refFix.bench_properties.optimal_progress).toBeCloseTo(0.9260416666666667, 15);
     expect(refFix.bench_properties.mdi).toBe(0.476);
-  });
+  }, 60_000);
 
   test("the floor gate: optimal clearly above stale (gap >= 0.30)", () => {
     const opt = refFix.rows.find((r) => r.label.startsWith("Optimal"))!;
