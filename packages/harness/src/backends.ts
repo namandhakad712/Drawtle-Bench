@@ -283,6 +283,20 @@ export abstract class ModelBackend {
     }
   }
 
+  /** Seconds to wait before retry attempt `attempt` after a retryable
+   *  failure (429/5xx) with no Retry-After header. Default: v2's
+   *  exponential backoff. Override when a provider's throttle is a sliding
+   *  window that FAST retries make worse — each retry consumes quota and
+   *  resets the window, so a 30s floor can succeed where 1/2/4s all fail. */
+  protected retryWaitS(_attempt: number, _status: number): number {
+    return 2 ** _attempt;
+  }
+
+  /** Upper bound for one retry wait, in seconds. */
+  protected retryWaitCeilingS(): number {
+    return 30;
+  }
+
   protected cost(pin: number, pout: number): { usd: number; known: boolean } {
     if (!(this.priceKnown || this.priced)) {
       this.costKnownFlag = false;
@@ -337,9 +351,9 @@ export abstract class ModelBackend {
         if (e instanceof HttpStatusError) {
           if (e.status === 429 || e.status >= 500) {
             const ra = e.retryAfter;
-            const wait = ra && /^\d+$/.test(ra) ? Number(ra) : 2 ** attempt;
+            const wait = ra && /^\d+$/.test(ra) ? Number(ra) : this.retryWaitS(attempt, e.status);
             if (attempt < this.maxRetries) {
-              await sleep(Math.min(wait, 30) * 1000);
+              await sleep(Math.min(wait, this.retryWaitCeilingS()) * 1000);
               continue;
             }
           }
@@ -869,6 +883,30 @@ const ZAI_VISION_SERVED = "glm-5.3-flash";
 export class ZaiBackend extends ModelBackend {
   name = "zai";
   override keyEnv: string[] = []; // creds live in the SDK's config, not env
+  // The sandbox service throttles aggressively (a burst of ~6 calls hits
+  // 429) and the limits are unpublished. A vision run fires one request per
+  // turn for minutes on end, so this backend paces itself: a 6s floor
+  // between requests was verified sustainable over dozens of consecutive
+  // vision calls (probe 2026-11-14), and the retry ladder is patient —
+  // a measurement should wait out a throttle window, not fail fast.
+  override maxRetries = 8;
+  override timeoutS = 120;
+  /** Floor between requests: keeps sustained runs under the throttle. */
+  private minIntervalMs = 6_000;
+  private lastCallAt = 0;
+
+  /** The throttle is a sliding window: a fast retry consumes quota and
+   *  RESETS the window, so 1/2/4s backoff never recovers (verified: four
+   *  quick retries all failed, then a 30s pause succeeded on the next
+   *  call). A 429 therefore waits 30s minimum, growing to 120s. */
+  protected override retryWaitS(attempt: number, status: number): number {
+    if (status === 429) return Math.min(30 + attempt * 15, 120);
+    return Math.min(2 ** attempt, 60);
+  }
+
+  protected override retryWaitCeilingS(): number {
+    return 120;
+  }
   private zai: unknown = null;
   private initPromise: Promise<unknown> | null = null;
 
@@ -928,6 +966,13 @@ export class ZaiBackend extends ModelBackend {
     opts: { temperature: number; maxTokens: number; extra: Record<string, unknown> },
     _signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
+    // Pacing floor: wait out the remainder of the interval before touching
+    // the service again. Retries ride their own (longer) backoff ladder.
+    const since = Date.now() - this.lastCallAt;
+    if (since < this.minIntervalMs) {
+      await new Promise<void>((r) => setTimeout(r, this.minIntervalMs - since));
+    }
+    this.lastCallAt = Date.now();
     const client = (await this.client()) as {
       chat: {
         completions: {

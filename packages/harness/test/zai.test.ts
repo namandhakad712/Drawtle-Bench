@@ -139,10 +139,24 @@ describe("zai backend (stubbed SDK)", () => {
     });
     const b = makeBackend("zai", "glm-4-plus", {}) as ZaiBackend;
     b.maxRetries = 1;
+    // shrink the production 30s 429 wait so the test stays fast; the ladder
+    // behaviour (a retry happens) is what is under test, the wait is
+    // asserted separately below
+    b.retryWaitS = () => 0.01;
     await expect(
       b.complete([{ role: "user", content: "move" }], { useCache: false }),
     ).rejects.toThrow();
     expect(calls).toBe(2); // initial + 1 retry — it WAS retried, not dropped
+  }, 30_000);
+
+  test("a 429 waits at least 30s before its next attempt (sliding-window throttle)", () => {
+    const b = makeBackend("zai", "glm-4-plus", {}) as ZaiBackend;
+    const probe = (b as unknown as { retryWaitS(a: number, s: number): number }).retryWaitS;
+    expect(probe.call(b, 0, 429)).toBeGreaterThanOrEqual(30);
+    expect(probe.call(b, 2, 429)).toBeGreaterThanOrEqual(45);
+    // 5xx keeps classic exponential backoff
+    expect(probe.call(b, 0, 500)).toBe(1);
+    expect(probe.call(b, 3, 500)).toBe(8);
   });
 
   test("plain SDK failures become transient (retryable) errors", () => {
