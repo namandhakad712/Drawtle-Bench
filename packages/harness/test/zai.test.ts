@@ -142,7 +142,8 @@ describe("zai backend (stubbed SDK)", () => {
     // shrink the production 30s 429 wait so the test stays fast; the ladder
     // behaviour (a retry happens) is what is under test, the wait is
     // asserted separately below
-    b.retryWaitS = () => 0.01;
+    const fast = b as unknown as { retryWaitS(a: number, s: number): number };
+    fast.retryWaitS = () => 0.01;
     await expect(
       b.complete([{ role: "user", content: "move" }], { useCache: false }),
     ).rejects.toThrow();
