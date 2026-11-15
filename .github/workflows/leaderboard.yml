@@ -45,15 +45,23 @@ jobs:
           bun packages/cli/src/index.ts self-check
           # v3.2: nothing ranks until it re-derives from its own log
           bun packages/cli/src/index.ts validate --all
-      - name: render the leaderboard (all levels + diamond view)
+      - name: render the site (all levels + diamond view)
         run: |
           bun packages/cli/src/index.ts leaderboard --publish-out public/
           bun packages/cli/src/index.ts leaderboard --level diamond --publish-out public/diamond/
-      - name: artifact sanity — index + data must exist and be non-empty
+      - name: artifact sanity — every page + data must exist and be non-empty
         run: |
           test -s public/index.html
           test -s public/data.json
+          test -s public/paper.html
+          test -s public/task.html
           test -s public/diamond/index.html
+          test -s public/diamond/paper.html
+          test -s public/diamond/task.html
+          # the pages are builds of the tree: each must carry the run's numbers
+          grep -q 'Drawtle Bench' public/index.html
+          grep -q 'Limitations, stated plainly' public/paper.html
+          grep -q 'the model replied, verbatim' public/task.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
