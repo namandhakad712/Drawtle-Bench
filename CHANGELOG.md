@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.3.1 — resume integrity: partial-episode rows are truncated, not duplicated
+
+Found the hard way: the text twin died mid-episode (zai 429 exhaustion),
+and its resume re-ran the episode from turn 0 while the crash's partial
+rows stayed in run.jsonl — every (episode, turn) of that episode twice.
+111 tests (+2), parity fixtures regenerated, `validate --all` green.
+
+### Fixed
+
+- **`truncatePartialEpisodes()`** (runstate.ts): on resume, run.jsonl
+  keeps only rows for checkpointed episodes. The rewrite is logged as a
+  `resume_truncated` event (severity warn) in the run's own event
+  stream — a log that was rewritten must say so. Malformed lines are
+  reported and kept, never silently judged.
+- **The twin's committed log repaired** with the same invariant: 88
+  rows (episodes 0-2, all checkpointed), 12 partial rows dropped.
+- **runs.test.ts** re-anchored to the real tree: the completed vision
+  run ranks live[0] (0.243 > agnes 0.169) and matches level slices;
+  the in-flight twin is excluded (status error, resumable), not ranked
+  — an unfinished run must not rank.
+
 ## v3.3.0 — the zai backend: the harness's own environment, measured
 
 The first real measurement taken inside the harness's own sandbox.

@@ -185,6 +185,75 @@ describe("end-to-end mock runs (lifecycle, checkpoints, floor gate)", () => {
     expect(summary.status).toBe("success");
     expect(summary.progress_rate).toBe(1.0);
   }, 120_000);
+
+  test("mid-episode crash leaves partial rows; resume truncates them (v3.3.1)", async () => {
+    const dir = scratch("e2e-midcrash");
+    const manifest = loadManifest(DS20);
+    const backend = makeBackend("mock", "mock", { mode: "optimal" });
+    const runner = new Runner(backend, {
+      config: { max_turns: 48 },
+      revealOptimal: true,
+      runId: "midcrash",
+      runMode: "test",
+    });
+    // crash mid-episode exactly the way the real one died: the backend
+    // throws mid-episode (the zai 429-exhaustion path). Episodes 0-1 are
+    // checkpointed; episode 2 has some rows in the log but no checkpoint.
+    const realRunEpisode = runner.runEpisode.bind(runner);
+    let specIdx = -1;
+    let callsThisEp = 0;
+    runner.runEpisode = async (spec, maze) => {
+      specIdx = spec.idx;
+      callsThisEp = 0;
+      return realRunEpisode(spec, maze);
+    };
+    const origComplete = backend.complete.bind(backend);
+    backend.complete = async (messages, opts) => {
+      callsThisEp += 1;
+      if (specIdx === 2 && callsThisEp === 3) {
+        throw new Error("simulated mid-episode crash");
+      }
+      return origComplete(messages, opts);
+    };
+    await expect(
+      runner.runDataset(manifest, nodePath.join(dir, "midcrash.jsonl"), { outDir: dir }),
+    ).rejects.toThrow(/simulated mid-episode crash/);
+    const jsonl = nodePath.join(dir, "midcrash.jsonl");
+    const rowsBefore = readFileSync(jsonl, "utf8")
+      .split("\n")
+      .filter((l) => l.trim());
+    const doneBlob = JSON.parse(readFileSync(nodePath.join(dir, "midcrash.done.json"), "utf8"));
+    const checkpointed = Object.keys(doneBlob.done).map(Number);
+    expect(checkpointed).toEqual([0, 1]);
+    const partialRows = rowsBefore.filter((l) => JSON.parse(l).episode === 2);
+    expect(partialRows.length).toBeGreaterThan(0); // the crash left partial rows
+
+    // resume: the partial rows must be truncated, not duplicated
+    const rest = new Runner(makeBackend("mock", "mock", { mode: "optimal" }), {
+      config: { max_turns: 48 },
+      revealOptimal: true,
+      runId: "midcrash",
+      runMode: "test",
+      resume: true,
+    });
+    expect(rest.resumeTruncation).toBeNull();
+    const meta = await rest.runDataset(manifest, jsonl, { outDir: dir });
+    expect(meta.n_skipped).toBe(2);
+    const rowsAfter = readFileSync(jsonl, "utf8")
+      .split("\n")
+      .filter((l) => l.trim());
+    const keys = rowsAfter.map((l) => {
+      const r = JSON.parse(l);
+      return `${r.episode}:${r.turn}`;
+    });
+    expect(new Set(keys).size).toBe(keys.length); // no (episode, turn) appears twice
+    const summary = aggregate(jsonl, meta, null);
+    expect(summary.status).toBe("success");
+    expect(summary.progress_rate).toBe(1.0);
+    // the event stream records the rewrite
+    const evts = readFileSync(nodePath.join(dir, "midcrash.events.jsonl"), "utf8");
+    expect(evts).toContain("resume_truncated");
+  }, 120_000);
 });
 
 describe("v3.1 — level slices, by_level and the event log, end to end", () => {

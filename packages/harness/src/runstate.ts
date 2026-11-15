@@ -370,6 +370,51 @@ export function loadDone(
   }
 }
 
+/** Resume invariant: run.jsonl may only carry rows for checkpointed
+ *  episodes. A crash mid-episode leaves partial rows (the checkpoint is
+ *  written at episode end), and the resumed run restarts that episode from
+ *  turn 0 — without truncation the log ends up with every (episode, turn)
+ *  twice, and every reader that aggregates by row double-counts the tail.
+ *  Returns the number of rows removed. Malformed lines are reported, never
+ *  silently rewritten: the run is left alone and the count reflects only
+ *  parseable rows (a malformed log needs a human, not a heuristic). */
+export function truncatePartialEpisodes(
+  jsonlPath: string,
+  done: Record<number, Rec>,
+): { removed: number; malformed: number } {
+  if (!nodeFs.existsSync(jsonlPath)) return { removed: 0, malformed: 0 };
+  const keepIdx = new Set(Object.keys(done).map(Number));
+  const lines = nodeFs.readFileSync(jsonlPath, "utf8").split("\n");
+  // preserve the trailing-newline shape: split() yields a final "" for a
+  // well-formed log; keep track so the rewrite reproduces it exactly
+  const trailingNewline = lines.length > 0 && lines[lines.length - 1] === "";
+  const body = trailingNewline ? lines.slice(0, -1) : lines;
+  const kept: string[] = [];
+  let removed = 0;
+  let malformed = 0;
+  for (const line of body) {
+    if (!line.trim()) continue;
+    let rec: Rec;
+    try {
+      rec = JSON.parse(line) as Rec;
+    } catch {
+      malformed += 1;
+      kept.push(line); // not ours to judge: keep it, report it
+      continue;
+    }
+    const ep = Number(rec.episode);
+    if (keepIdx.size > 0 && Number.isInteger(ep) && !keepIdx.has(ep)) {
+      removed += 1;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (removed === 0) return { removed, malformed };
+  const out = kept.length ? kept.join("\n") + (trailingNewline || kept.length ? "\n" : "") : "";
+  nodeFs.writeFileSync(jsonlPath, out);
+  return { removed, malformed };
+}
+
 export function saveDone(
   outDir: string,
   runId: string,

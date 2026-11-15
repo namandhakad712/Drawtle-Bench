@@ -60,6 +60,7 @@ import {
   readStatus,
   runPaths,
   saveDone,
+  truncatePartialEpisodes,
 } from "./runstate";
 import { provenance } from "./sandbox";
 import { TranscriptPool, savePool } from "./transcript";
@@ -258,6 +259,9 @@ export class Runner {
   /** v3.1: what level slice this run measures (recorded in status, summary
    *  and events so a filtered run can never masquerade as a full one). */
   levelMeta: { selector: string; hash: string; source: string } | null = null;
+  /** v3.3.1: set when a resume truncated partial-episode rows from the
+   *  log (crash-recovery bookkeeping; logged as an event, not hidden). */
+  resumeTruncation: { removed: number; malformed: number } | null = null;
 
   constructor(
     backend: ModelBackend,
@@ -728,6 +732,12 @@ export class Runner {
           `cannot resume ${this.runId}: checkpoint was written for dataset ${prevHash} but this manifest is ${datasetHash}. Use a fresh --run-id.`,
         );
       }
+      // Resume invariant: the log keeps only checkpointed episodes. A crash
+      // mid-episode leaves partial rows that the re-run would duplicate.
+      const trunc = truncatePartialEpisodes(outJsonl, done);
+      if (trunc.removed > 0 || trunc.malformed > 0) {
+        this.resumeTruncation = trunc;
+      }
     }
 
     const statusExtra: Record<string, unknown> = {
@@ -773,6 +783,11 @@ export class Runner {
     );
     if (opts.warmup) {
       this.events.log("warmup", opts.warmup as Record<string, unknown>);
+    }
+    if (this.resumeTruncation) {
+      // v3.3.1: crash-recovery bookkeeping, kept visible on purpose — a
+      // log that was rewritten must say so in its own event stream.
+      this.events.log("resume_truncated", { ...this.resumeTruncation }, "warn");
     }
 
     const episodes: Record<string, unknown>[] = [];
