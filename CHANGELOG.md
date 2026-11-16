@@ -1,5 +1,37 @@
 # Changelog
 
+## v3.6.0 — play the bench yourself; a real design system
+
+### Added
+
+- **"You try it" — the visitor plays the probe.** Four real rounds of a
+  measured episode (chosen at build time from the recorded rotations:
+  every round has a reachable exit, the opening has an improving move,
+  a wall is adjacent, rotations vary). The visitor picks a relative
+  turn and step from the same no-heading frame a model gets; the client
+  scores it exactly as the harness would (verdict pill, plain-language
+  explanation, the scorer's map with the visitor's move overlaid as a
+  ghost or ✕, the optimal move for comparison), then the final screen
+  places the visitor's score beside the measured model's and the
+  optimal policy's. Every reachable frame variant is precomputed at
+  build time — no game logic in the build, no runtime dependencies.
+- **A design system** (documented in DESIGN-SYSTEM.md): Space Grotesk
+  display / Inter UI / Source Serif 4 paper body / JetBrains Mono
+  numerals; five semantic verdict colours with a stated psychology
+  (green progress, red-orange wall, amber stale, blue informational,
+  magenta invalid) applied consistently across pills, minimaps, charts
+  and the demo; SVG favicon; Open Graph / Twitter card with a rendered
+  og-card.png (scripts/og-card.mjs).
+- Paper page now typeset in serif — it is prose and reads like it.
+- Chart bars grow from the left on reveal; rounded caps.
+
+### Changed
+
+- The task page title is now "play the task" and carries the OG card —
+  it is the page built to be shared.
+- Demo selection scans all measured episodes' real rotation schedules
+  instead of hard-coding one.
+
 ## v3.5.0 — the site you can play with
 
 The v3.4.0 site was readable. This one is explorable.
