@@ -95,13 +95,13 @@ describe("results-tree enumeration parity (v2 + v3 layouts, all runs)", () => {
   test("v3.1: --level filter rejects bad selectors and matches measured levels", () => {
     expect(() => leaderboard(RESULTS, { level: "L5" })).toThrow(/invalid --level/);
     expect(() => leaderboard(RESULTS, { level: "nope" })).toThrow(/invalid --level/);
-    // The completed zai run attached levels (selector "all"), so slices
-    // match it; agnes predates levels and the in-flight twin has no summary
-    // yet, so neither matches a slice.
+    // Both completed zai runs attached levels (selector "all"), so slices
+    // match them; agnes predates levels, so it never matches a slice.
     expect(leaderboard(RESULTS, { level: "diamond" }).map((r) => r.run_id)).toEqual([
       "run-glm-5.3-flash-vision",
+      "run-glm-4-plus-text",
     ]);
-    expect(leaderboard(RESULTS, { level: "L4" }).length).toBe(1);
+    expect(leaderboard(RESULTS, { level: "L4" }).length).toBe(2);
     expect(leaderboard(RESULTS, { level: "all" }).length).toBe(
       leaderboard(RESULTS, { onlyClean: true }).length,
     );
@@ -111,24 +111,25 @@ describe("results-tree enumeration parity (v2 + v3 layouts, all runs)", () => {
     expectDeepEqual(excludedRuns(RESULTS), fix.excluded, "excluded");
   });
 
-  test("live ranking: the vision run reads frames; the in-flight twin is parked, not ranked", () => {
+  test("live ranking: vision runs on top, the completed blind twin ranks at the floor — labeled", () => {
     const live = leaderboard(RESULTS, { onlyClean: true, mode: "live" });
-    expect(live.length).toBe(2);
-    // Ranked by progress: glm-5.3-flash WITH frames (0.243) > agnes
-    // (0.169). The blind text twin is mid-run (status error, resumable)
-    // and therefore excluded — an unfinished run must not rank.
+    expect(live.length).toBe(3);
+    // Ranked by progress: glm-5.3-flash WITH frames (0.243) > agnes (0.169)
+    // > glm-4-plus text-only (0.018). The control experiment is a completed
+    // live measurement of the BLIND condition: it ranks — never unlabeled,
+    // which is what the v3.7 `vision` field is for.
     expect(live[0].run_id).toBe("run-glm-5.3-flash-vision");
     expect(live[0].status).toBe("success");
+    expect(live[0].vision).toBe(true);
     expect(live[1].run_id).toContain("agnes");
+    expect(live[2].run_id).toBe("run-glm-4-plus-text");
+    expect(live[2].vision).toBe(false); // the modality marker the site pill reads
     const ex = excludedRuns(RESULTS);
-    // two flat legacy mocks (unknown) + the resumable twin (error)
+    // two flat legacy mocks (unknown) — nothing else is excluded anymore
     const byStatus = ex.map((e) => String(e.status)).sort();
-    expect(byStatus).toEqual(["error", "unknown", "unknown"]);
+    expect(byStatus).toEqual(["unknown", "unknown"]);
     for (const e of ex) {
       expect(e.reason).toBeTruthy();
     }
-    expect(ex.length).toBe(3);
-    const twin = ex.find((e) => String(e.run_id).includes("glm-4-plus"));
-    expect(twin?.status).toBe("error"); // crashed runs resume, they don't rank
   });
 });

@@ -65,6 +65,18 @@ import {
 import { provenance } from "./sandbox";
 import { TranscriptPool, savePool } from "./transcript";
 
+/** Normalize a run-artifact path for status.json: repo-relative when the
+ *  target sits under the repo root (so a resumed run from an absolute
+ *  --out-dir still records the same portable form every other run has),
+ *  otherwise unchanged (out-of-repo --out-dir is legal and stays explicit). */
+function relativizeUnderRoot(p: string): string {
+  // src/ → packages/harness/src, so the repo root is three levels up.
+  const root = nodePath.resolve(__dirname, "..", "..", "..");
+  const abs = nodePath.resolve(p);
+  if (abs.startsWith(root + nodePath.sep)) return nodePath.relative(root, abs);
+  return p;
+}
+
 export class WarmupError extends Error {}
 
 /** Thrown by a supervisor stop; distinct from a failure. */
@@ -746,7 +758,12 @@ export class Runner {
       dataset_hash: datasetHash,
       navigate: this.navigate,
       config: this.config,
-      out_jsonl: outJsonl,
+      // status.json is a committed, portable artifact: record the log path
+      // relative to the repo root when it lives under it, so a run resumed
+      // with an absolute --out-dir (or from a different checkout path)
+      // still matches the form every other run's status carries (this form
+      // is parity-tested against the frozen v2 reference).
+      out_jsonl: relativizeUnderRoot(outJsonl),
       resumed: Object.keys(done).length > 0,
       mode: this.runMode,
     };
